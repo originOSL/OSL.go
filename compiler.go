@@ -59,6 +59,7 @@ func Compile(ast [][]*Token) string {
 			"bytes":         true,
 			"encoding/json": true,
 			"bufio":         true,
+			"os":            true,
 		},
 		DeclaredVars: make(map[string]bool),
 	}

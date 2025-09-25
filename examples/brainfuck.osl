@@ -36,16 +36,16 @@ def main() (
         total = pointer
         data[pointer] = 0
       )
-      memory = data[pointer] ?? 0
+      memory = (data[pointer] ?? 0).toInt()
     ) else if char == "<" (
       if pointer > 0 (
         pointer -= 1
       )
-      memory = data[pointer] ?? 0
+      memory = (data[pointer] ?? 0).toInt()
     ) else if char == "." (
       out ++= memory.chr()
     ) else if char == "," (
-      memory = "Enter a character".ask().toNum()
+      memory = "Enter a character".ask().toInt()
       data[pointer] = memory
     ) else if char == "[" and memory == 0 (
       openloops = 1
