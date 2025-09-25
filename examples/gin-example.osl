@@ -1,0 +1,27 @@
+import "os"
+import "github.com/gin-gonic/gin"
+
+
+def main() (
+    string port = os.Getenv("PORT")
+
+    if port == "" (
+        port = "8080"
+        log "Defaulting to port" port
+    )
+
+    // Starts a new Gin instance with no middle-ware
+    r = gin.New()
+
+    // Define handlers
+    r.GET("/", def(*gin.Context c) -> (
+        c.String(200, "Hello World!")
+    ))
+    r.GET("/ping", def(*gin.Context c) -> (
+        c.String(200, "pong")
+    ))
+
+    // Listen and serve on defined port
+    log "Listening on port" port
+    r.Run((":" ++ port).toStr())
+)

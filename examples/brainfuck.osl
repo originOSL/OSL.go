@@ -1,0 +1,76 @@
+
+def main() (
+  script = "++++++++[>++++[>++>+++>+++>+<<<<-]>+>+>->>+[<]<-]>>.>---.+++++++..+++.>>.<-.<.+++.------.--------.>>+.>++."
+
+  len = script.len
+
+  pointer = 0
+  memory = 0
+  total = 0
+  out = ""
+  data = {key: "value"}
+
+  openloops = 0
+  
+  int i = 0
+  while i < len (
+    char = script[i]
+
+    if char == "+" (
+      if memory == 255 (
+        memory = 0
+      ) else (
+        memory += 1
+      )
+      data[pointer] = memory
+    ) else if char == "-" (
+      if memory == 0 (
+        memory = 255
+      ) else (
+        memory -= 1
+      )
+      data[pointer] = memory
+    ) else if char == ">" (
+      pointer += 1
+      if pointer > total (
+        total = pointer
+        data[pointer] = 0
+      )
+      memory = data[pointer] ?? 0
+    ) else if char == "<" (
+      if pointer > 0 (
+        pointer -= 1
+      )
+      memory = data[pointer] ?? 0
+    ) else if char == "." (
+      out ++= memory.chr()
+    ) else if char == "," (
+      memory = "Enter a character".ask().toNum()
+      data[pointer] = memory
+    ) else if char == "[" and memory == 0 (
+      openloops = 1
+      while openloops > 0 and i < len (
+        i += 1
+        char = script[i]
+        if char == "[" (
+          openloops += 1
+        ) else if char == "]" (
+          openloops -= 1
+        )
+      )
+    ) else if char == "]" and memory != 0 (
+      openloops = 1
+      while openloops > 0 and i >= 0 (
+        i -= 1
+        char = script[i]
+        if char == "[" (
+          openloops -= 1
+        ) else if char == "]" (
+          openloops += 1
+        )
+      )
+    )
+    i += 1
+  )
+  log out
+)
