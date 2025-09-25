@@ -16,7 +16,6 @@ def evaluate(string script) string (
   int i = 1
   while i < len (
     char = script[i]
-    log "Char" char
 
     if char == "+" (
       if memory == 255 (
