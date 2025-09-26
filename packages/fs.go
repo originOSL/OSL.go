@@ -5,46 +5,51 @@
 
 type FS struct{}
 
-func (FS) ReadFile(path string) string {
-	data, err := os.ReadFile(path)
+func (FS) ReadFile(path any) string {
+	data, err := os.ReadFile(OSLcastString(path))
 	if err != nil {
 		return ""
 	}
 	return string(data)
 }
 
-func (FS) WriteFile(path string, data string) bool {
-	err := os.WriteFile(path, []byte(data), 0644)
+func (FS) WriteFile(path any, data any) bool {
+	err := os.WriteFile(OSLcastString(path), []byte(OSLcastString(data)), 0644)
 	return err == nil
 }
 
-func (FS) Exists(path string) bool {
-	_, err := os.Stat(path)
+func (FS) Rename(oldPath any, newPath any) bool {
+	err := os.Rename(OSLcastString(oldPath), OSLcastString(newPath))
 	return err == nil
 }
 
-func (FS) Remove(path string) bool {
-	err := os.Remove(path)
+func (FS) Exists(path any) bool {
+	_, err := os.Stat(OSLcastString(path))
 	return err == nil
 }
 
-func (FS) RemoveAll(path string) bool {
-	err := os.RemoveAll(path)
+func (FS) Remove(path any) bool {
+	err := os.Remove(OSLcastString(path))
 	return err == nil
 }
 
-func (FS) Mkdir(path string) bool {
-	err := os.Mkdir(path, 0755)
+func (FS) RemoveAll(path any) bool {
+	err := os.RemoveAll(OSLcastString(path))
 	return err == nil
 }
 
-func (FS) MkdirAll(path string) bool {
-	err := os.MkdirAll(path, 0755)
+func (FS) Mkdir(path any) bool {
+	err := os.Mkdir(OSLcastString(path), 0755)
 	return err == nil
 }
 
-func (FS) ReadDir(path string) []string {
-	files, err := os.ReadDir(path)
+func (FS) MkdirAll(path any) bool {
+	err := os.MkdirAll(OSLcastString(path), 0755)
+	return err == nil
+}
+
+func (FS) ReadDir(path any) []string {
+	files, err := os.ReadDir(OSLcastString(path))
 	if err != nil {
 		return []string{}
 	}
@@ -55,6 +60,14 @@ func (FS) ReadDir(path string) []string {
 	return names
 }
 
+func (FS) IsDir(path any) bool {
+	info, err := os.Stat(OSLcastString(path))
+	if err != nil {
+		return false
+	}
+	return info.IsDir()
+}
+
 func (FS) Getwd() string {
 	dir, err := os.Getwd()
 	if err != nil {
@@ -63,29 +76,34 @@ func (FS) Getwd() string {
 	return dir
 }
 
-func (FS) Chdir(path string) bool {
-	err := os.Chdir(path)
+func (FS) Chdir(path any) bool {
+	err := os.Chdir(OSLcastString(path))
 	return err == nil
 }
 
-func (FS) JoinPath(path ...string) string {
-	return filepath.Join(path...)
+func (FS) JoinPath(path ...any) string {
+	stringPath := make([]string, len(path))
+	for i, p := range path {
+		stringPath[i] = OSLcastString(p)
+	}
+	return filepath.Join(stringPath...)
 }
 
-func (FS) getBase(path string) string {
-	return filepath.Base(path)
+func (FS) GetBase(path any) string {
+	return filepath.Base(OSLcastString(path))
 }
 
-func (FS) getDir(path string) string {
-	return filepath.Dir(path)
+func (FS) GetDir(path any) string {
+	return filepath.Dir(OSLcastString(path))
 }
 
-func (FS) getExt(path string) string {
-	return filepath.Ext(path)
+func (FS) GetExt(path any) string {
+	return filepath.Ext(OSLcastString(path))
 }
 
-func (FS) getParts(path string) []string {
-	return []string{filepath.Base(path), filepath.Dir(path), filepath.Ext(path)}
+func (FS) GetParts(path any) []string {
+	stringPath := OSLcastString(path)
+	return []string{filepath.Base(stringPath), filepath.Dir(stringPath), filepath.Ext(stringPath)}
 }
 
 // Global instance

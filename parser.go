@@ -53,7 +53,7 @@ type Token struct {
 	Right            *Token      `json:"right,omitempty"`
 	Right2           *Token      `json:"right2,omitempty"`
 	Parameters       []*Token    `json:"parameters,omitempty"`
-	IsStatic         bool        `json:"isStatic,omitempty"`
+	ObjPath          []*Token    `json:"obj_path,omitempty"`
 	Static           interface{} `json:"static,omitempty"`
 	ParseError       string      `json:"parse_error,omitempty"`
 	SetType          string      `json:"set_type,omitempty"`
@@ -434,14 +434,6 @@ func RandomString(length int) string {
 	return result.String()
 }
 
-// IsStaticToken checks if a token represents a static value
-func (utils *OSLUtils) IsStaticToken(token *Token) bool {
-	if token == nil {
-		return false
-	}
-	return utils.staticTypes[utils.getTokenTypeString(token.Type)]
-}
-
 // getTokenTypeString converts token type int to string
 func (utils *OSLUtils) getTokenTypeString(tokenType string) string {
 	switch tokenType {
@@ -710,7 +702,7 @@ func (utils *OSLUtils) StringToToken(cur string, param bool) *Token {
 		return &Token{Type: TKN_SPR, Data: utils.StringToToken(cur[3:], false)}
 	}
 
-	if len(cur) > 1 && (start == '!' || start == '-' || start == '+') {
+	if len(cur) > 1 && (start == '!' || start == '-' || start == '+' || start == '*' || start == '@') {
 		return &Token{
 			Type:  TKN_URY,
 			Data:  string(start),
@@ -762,41 +754,10 @@ func (utils *OSLUtils) StringToToken(cur string, param bool) *Token {
 
 				if param {
 					obj := &Token{Type: TKN_MTV, Data: "item", Parameters: parsedTokens}
-					obj.IsStatic = true
-					for _, token := range parsedTokens {
-						if !utils.IsStaticToken(token) {
-							obj.IsStatic = false
-							break
-						}
-					}
-					if obj.IsStatic {
-						if len(parsedTokens) == 1 && parsedTokens[0].Type == TKN_STR {
-							return &Token{Type: TKN_MTV, Data: parsedTokens[0].Data}
-						}
-						var static []any
-						for _, token := range parsedTokens {
-							static = append(static, token.Data)
-						}
-						obj.Static = static
-					}
 					return obj
 				}
 
 				arr := &Token{Type: TKN_ARR, Data: parsedTokens}
-				arr.IsStatic = true
-				for _, token := range parsedTokens {
-					if !utils.IsStaticToken(token) {
-						arr.IsStatic = false
-						break
-					}
-				}
-				if arr.IsStatic {
-					var static []interface{}
-					for _, token := range parsedTokens {
-						static = append(static, token.Data)
-					}
-					arr.Static = static
-				}
 				return arr
 			} else if cur[0] == '{' {
 				if cur == "{}" {
@@ -812,7 +773,6 @@ func (utils *OSLUtils) StringToToken(cur string, param bool) *Token {
 					keyValue := AutoTokenise(token, ":")
 					if len(keyValue) == 1 {
 						keyValue = append(keyValue, keyValue[0])
-						fmt.Println(JsonStringify(keyValue))
 					}
 					key := strings.TrimSpace(keyValue[0])
 					value := strings.TrimSpace(keyValue[1])
@@ -1293,9 +1253,9 @@ func (utils *OSLUtils) GenerateAST(code string, start int, main bool) []*Token {
 					final := pathData[len(pathData)-1]
 
 					cur.Left = &Token{
-						Type:  TKN_RMT,
-						Data:  path,
-						Final: final,
+						Type:    TKN_RMT,
+						ObjPath: pathData,
+						Final:   final,
 					}
 				}
 			}
@@ -1338,12 +1298,6 @@ func (utils *OSLUtils) GenerateAST(code string, start int, main bool) []*Token {
 				}
 				ast[0].Cases = cases
 			}
-		}
-	}
-
-	if len(ast) > 0 && ast[0].Type == TKN_ASI {
-		if ast[0].Right != nil && utils.IsStaticToken(ast[0].Right) {
-			ast[0].Right.StaticAssignment = true
 		}
 	}
 

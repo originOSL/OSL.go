@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	OSL_VERSION  = "0.1.1"
+	OSL_VERSION  = "0.2.0"
 	OSL_NAME     = "OSL.go"
 	OSL_AUTHOR   = "Mistium"
 	OSL_LICENSE  = "MIT"
@@ -32,6 +32,7 @@ Commands:
   origin                Open Origin website (https://origin.mistium.com)
   help                  Show this help message
   version               Show version information
+  cloc <dir> <type?>    Count lines of code in directory
 
 For more information, visit: https://origin.mistium.com`
 )
@@ -316,6 +317,59 @@ func run(args []string) {
 	}
 }
 
+func cloc(args []string) {
+	if len(args) < 1 {
+		fmt.Println("Usage: osl cloc <dir> <filetype?>")
+		fmt.Println("Example: osl cloc . osl")
+		return
+	}
+
+	dir := args[0]
+	fileType := "osl"
+	if len(args) > 1 {
+		fileType = args[1]
+	}
+
+	total := 0
+
+	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			fmt.Println("Error reading:", path, err)
+			return nil // keep walking
+		}
+
+		if d.IsDir() {
+			return nil
+		}
+
+		if !strings.HasSuffix(d.Name(), "."+fileType) {
+			return nil
+		}
+
+		script := openFile(path)
+		if script == "" {
+			return nil
+		}
+
+		lines := strings.Split(script, "\n")
+		count := 0
+		for _, line := range lines {
+			if strings.TrimSpace(line) != "" {
+				count++
+			}
+		}
+		total += count
+		return nil
+	})
+
+	if err != nil {
+		fmt.Println("Failed to walk directory:", err)
+		return
+	}
+
+	fmt.Println("Total lines of code:", total)
+}
+
 func main() {
 	args := os.Args
 	if len(args) < 2 {
@@ -344,6 +398,8 @@ func main() {
 		fmt.Println(fmt.Sprintf(response, OSL_VERSION))
 	case "version":
 		fmt.Println(OSL_VERSION)
+	case "cloc":
+		cloc(args[2:])
 	default:
 		fmt.Println("Usage: osl <script> -o <output> -a (true/false generate ast)")
 		return
