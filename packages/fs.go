@@ -72,5 +72,21 @@ func (FS) JoinPath(path ...string) string {
 	return filepath.Join(path...)
 }
 
+func (FS) getBase(path string) string {
+	return filepath.Base(path)
+}
+
+func (FS) getDir(path string) string {
+	return filepath.Dir(path)
+}
+
+func (FS) getExt(path string) string {
+	return filepath.Ext(path)
+}
+
+func (FS) getParts(path string) []string {
+	return []string{filepath.Base(path), filepath.Dir(path), filepath.Ext(path)}
+}
+
 // Global instance
 var fs = FS{}

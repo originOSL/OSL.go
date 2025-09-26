@@ -236,10 +236,6 @@ func CompileToken(token *Token, ctx VariableContext) string {
 					compiledRight = fmt.Sprintf("float64(%v)", compiledRight)
 				case "boolean":
 					compiledRight = fmt.Sprintf("bool(%v)", compiledRight)
-				case "object":
-					if !strings.HasSuffix(compiledRight, "{}") {
-						compiledRight = fmt.Sprintf("%v.(map[string]any)", compiledRight)
-					}
 				case "array":
 					if !strings.HasSuffix(compiledRight, "{}") {
 						compiledRight = fmt.Sprintf("%v.([]any)", compiledRight)
