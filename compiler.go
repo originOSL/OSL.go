@@ -3,11 +3,15 @@ package main
 import (
 	"embed"
 	"fmt"
+	"os"
 	"strings"
 )
 
 //go:embed std/*.go
 var typesFS embed.FS
+
+//go:embed packages/*.go
+var packagesFS embed.FS
 
 type VariableContext struct {
 	Globals      map[string]any
@@ -41,7 +45,10 @@ func mapOSLTypeToGo(oslType string) string {
 	case "array":
 		return "[]any"
 	default:
-		return "any"
+		if strings.HasSuffix(oslType, "[]") {
+			return "[]" + mapOSLTypeToGo(strings.TrimSuffix(oslType, "[]"))
+		}
+		return oslType
 	}
 }
 
@@ -60,6 +67,7 @@ func Compile(ast [][]*Token) string {
 			"encoding/json": true,
 			"bufio":         true,
 			"os":            true,
+			"reflect":       true,
 		},
 		DeclaredVars: make(map[string]bool),
 	}
@@ -68,15 +76,67 @@ func Compile(ast [][]*Token) string {
 	for _, v := range ctx.Prepend {
 		prepend += fmt.Sprintf("%v", v)
 	}
+
+	imported := make(map[string]bool)
+	goImports := []string{}
+
 	for k, v := range ctx.Imports {
-		if v {
-			prepend += fmt.Sprintf("import %v\n", JsonStringify(k))
+		if !v {
+			continue
 		}
+
+		if imported[k] {
+			continue
+		}
+		imported[k] = true
+
+		if after, ok := strings.CutPrefix(k, "osl/"); ok {
+			data, err := packagesFS.ReadFile("packages/" + after + ".go")
+			if err != nil {
+				panic(err)
+			}
+			file := string(data)
+			lines := strings.Split(file, "\n")
+			for _, line := range lines {
+				if requires, ok := strings.CutPrefix(line, "// requires: "); ok {
+					parts := strings.Split(requires, ", ")
+					for _, part := range parts {
+						if imported[part] {
+							continue
+						}
+						part = strings.TrimSpace(part)
+						imported[part] = true
+						goImports = append(goImports, part)
+					}
+				}
+			}
+			compiled = "\n" + strings.TrimSpace(file) + compiled
+			continue
+		}
+
+		if strings.HasPrefix(k, "./") && strings.HasSuffix(k, ".osl") {
+			data, err := os.ReadFile(strings.TrimPrefix(k, "./"))
+			if err != nil {
+				panic(err)
+			}
+			compiled = "\n" + CompileBlock(scriptToAst(string(data)), ctx) + compiled
+			continue
+		}
+
+		goImports = append(goImports, k)
+	}
+
+	if len(goImports) > 0 {
+		prepend += "import (\n"
+		for _, pkg := range goImports {
+			prepend += fmt.Sprintf("\t%q\n", pkg)
+		}
+		prepend += ")\n\n"
 	}
 
 	prepend += include("std/general.go")
 
-	return "package main\n" + prepend + compiled
+	return prepend + compiled
 }
 
 func CompileBlock(block [][]*Token, ctx VariableContext) string {
@@ -120,7 +180,7 @@ func CompileToken(token *Token, ctx VariableContext) string {
 			}
 			returns := ""
 			if token.Right.Returns != "" {
-				returns = token.Right.Returns + " "
+				returns = mapOSLTypeToGo(token.Right.Returns) + " "
 			}
 			out := "func " + token.Left.Data.(string) + "(" +
 				params_string + ") " + returns + "{\n" +
@@ -137,6 +197,8 @@ func CompileToken(token *Token, ctx VariableContext) string {
 			op = "="
 		case "=":
 			op = "="
+		case ":=":
+			op = ":="
 		case "++=":
 			op = "+="
 		case "+=":
@@ -158,13 +220,37 @@ func CompileToken(token *Token, ctx VariableContext) string {
 			varName = token.Left.Data.(string)
 		}
 
-		if varName != "" && !ctx.DeclaredVars[varName] {
-			ctx.DeclaredVars[varName] = true
+		if varName != "" {
+			declared := ctx.DeclaredVars[varName]
+			if !declared {
+				ctx.DeclaredVars[varName] = true
+			}
 			if token.SetType != "" {
-				goType := mapOSLTypeToGo(token.SetType)
+				tokenType := token.SetType
+				switch tokenType {
+				case "string":
+					compiledRight = fmt.Sprintf("string(%v)", compiledRight)
+				case "int":
+					compiledRight = fmt.Sprintf("int(%v)", compiledRight)
+				case "number":
+					compiledRight = fmt.Sprintf("float64(%v)", compiledRight)
+				case "boolean":
+					compiledRight = fmt.Sprintf("bool(%v)", compiledRight)
+				case "object":
+					if !strings.HasSuffix(compiledRight, "{}") {
+						compiledRight = fmt.Sprintf("%v.(map[string]any)", compiledRight)
+					}
+				case "array":
+					if !strings.HasSuffix(compiledRight, "{}") {
+						compiledRight = fmt.Sprintf("%v.([]any)", compiledRight)
+					}
+				}
+				goType := mapOSLTypeToGo(tokenType)
 				return fmt.Sprintf("var %v %v %v %v", compiledLeft, goType, op, compiledRight)
 			}
-			return fmt.Sprintf("var %v %v %v", compiledLeft, op, compiledRight)
+			if !declared {
+				return fmt.Sprintf("var %v %v %v", compiledLeft, op, compiledRight)
+			}
 		}
 
 		return fmt.Sprintf("%v %v %v", compiledLeft, op, compiledRight)
@@ -176,9 +262,9 @@ func CompileToken(token *Token, ctx VariableContext) string {
 		case "??":
 			return fmt.Sprintf("OSLnullishCoaless(%v, %v)", compiledLeft, compiledRight)
 		case "+":
-			return fmt.Sprintf("%v + \" \" + %v", compiledLeft, compiledRight)
+			return fmt.Sprintf("%v + %v", compiledLeft, compiledRight)
 		case "++":
-			return fmt.Sprintf("OSLconcat(%v, %v)", compiledLeft, compiledRight)
+			return fmt.Sprintf("OSLjoin(%v, %v)", compiledLeft, compiledRight)
 		case "-", "/", "%":
 			return fmt.Sprintf("(%v %v %v)", compiledLeft, token.Data, compiledRight)
 		case "*":
@@ -212,8 +298,6 @@ func CompileToken(token *Token, ctx VariableContext) string {
 		return fmt.Sprintf("%v %v %v", CompileToken(token.Left, ctx), op, CompileToken(token.Right, ctx))
 	case TKN_BIT:
 		return fmt.Sprintf("%v %v %v", CompileToken(token.Left, ctx), token.Data, CompileToken(token.Right, ctx))
-	case TKN_URY:
-		return fmt.Sprintf("%v %v", CompileToken(token.Left, ctx), CompileToken(token.Right, ctx))
 	case TKN_STR:
 		return JsonStringify(token.Data)
 	case TKN_NUM:
@@ -223,12 +307,23 @@ func CompileToken(token *Token, ctx VariableContext) string {
 		if strings.HasPrefix(varName, "OSL") {
 			panic("Cannot use reserved variable name: " + varName)
 		}
+		switch varName {
+		case "null":
+			return "nil"
+		case "timestamp":
+			return "time.Now().UnixMilli()"
+		}
 		return varName
 	case TKN_BLK:
 		ctx.Indent++
 		blk := CompileBlock(token.Data.([][]*Token), ctx)
 		ctx.Indent--
 		return fmt.Sprintf("(\n%v\n)", blk)
+	case TKN_ARR:
+		ctx.Indent++
+		arr := CompileArray(token.Data.([]*Token), ctx)
+		ctx.Indent--
+		return arr
 	case TKN_OBJ:
 		ctx.Indent++
 		if token.Data == nil {
@@ -270,6 +365,8 @@ func CompileToken(token *Token, ctx VariableContext) string {
 			out += AddIndent("}", (ctx.Indent-2)*2)
 			ctx.Indent--
 			return out
+		case "typeof":
+			return fmt.Sprintf("OSLtypeof(%v)", CompileToken(token.Parameters[0], ctx))
 		default:
 			// params := []string{}
 			paramString := ""
@@ -283,6 +380,8 @@ func CompileToken(token *Token, ctx VariableContext) string {
 			}
 			return fmt.Sprintf("%v(%v)", token.Data, paramString)
 		}
+	case TKN_URY:
+		return fmt.Sprintf("%v(%v)", token.Data, CompileToken(token.Right, ctx))
 	case TKN_MTD:
 		out := ""
 		parts := token.Data.([]*Token)
@@ -340,6 +439,24 @@ func CompileToken(token *Token, ctx VariableContext) string {
 					out = fmt.Sprintf("strings.Index(%v, %v)", out, params[0])
 				case "strip":
 					out = fmt.Sprintf("strings.TrimSpace(%v)", out)
+				case "append":
+					out = fmt.Sprintf("append(%v, %v)", out, params[0])
+				case "prepend":
+					out = fmt.Sprintf("append(%v, %v)", params[0], out)
+				case "join":
+					out = fmt.Sprintf("strings.Join(%v, %v)", out, params[0])
+				case "split":
+					out = fmt.Sprintf("strings.Split(%v, %v)", out, params[0])
+				case "trim":
+					out = fmt.Sprintf("OSLtrim(%v, %v, %v)", out, params[0], params[1])
+				case "JsonStringify":
+					out = fmt.Sprintf("JsonStringify(%v)", out)
+				case "JsonParse":
+					out = fmt.Sprintf("JsonParse(%v)", out)
+				case "@": // assert type
+					params[0] = strings.Trim(params[0], "\"")
+					params[0] = mapOSLTypeToGo(params[0])
+					out = fmt.Sprintf("%v.(%v)", out, params[0])
 				default:
 					if len(part.Parameters) == 0 {
 						out = fmt.Sprintf("%v.%v()", out, name)
@@ -403,6 +520,18 @@ func CompileCmd(cmd []*Token, ctx VariableContext) string {
 				break
 			}
 		}
+	case "for":
+		if len(cmd) < 3 {
+			panic("For command requires at least 2 parameters")
+		}
+		iteratorVar := cmd[1].Data.(string)
+		loopNumber := CompileToken(cmd[2], ctx)
+		blk := cmd[3]
+		ctx.Indent++
+		out += fmt.Sprintf("for %v := 1; %v <= %v; %v++ {\n", iteratorVar, iteratorVar, loopNumber, iteratorVar)
+		out += CompileBlock(blk.Data.([][]*Token), ctx)
+		ctx.Indent--
+		out += AddIndent("}", ctx.Indent*2)
 	case "while":
 		if len(cmd) < 3 {
 			panic("While command requires at least 2 parameters")
@@ -442,6 +571,10 @@ func CompileCmd(cmd []*Token, ctx VariableContext) string {
 			panic("Import command requires at least 1 parameter")
 		}
 		ctx.Imports[cmd[1].Data.(string)] = true
+	case "void":
+		for i := 1; i < len(cmd); i++ {
+			out += CompileToken(cmd[i], ctx)
+		}
 	}
 	return out + "\n"
 }
@@ -456,6 +589,17 @@ func CompileObject(obj [][]*Token, ctx VariableContext) string {
 			keyStr = CompileToken(token[0], ctx)
 		}
 		out += AddIndent(fmt.Sprintf("%v: %v,\n", keyStr, CompileToken(token[1], ctx)), ctx.Indent*2)
+	}
+	return out + AddIndent("}", (ctx.Indent-1)*2)
+}
+
+func CompileArray(arr []*Token, ctx VariableContext) string {
+	if len(arr) == 0 {
+		return "[]any{}"
+	}
+	var out string = "[]any{\n"
+	for _, token := range arr {
+		out += AddIndent(fmt.Sprintf("%v,\n", CompileToken(token, ctx)), ctx.Indent*2)
 	}
 	return out + AddIndent("}", (ctx.Indent-1)*2)
 }

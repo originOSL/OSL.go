@@ -810,8 +810,12 @@ func (utils *OSLUtils) StringToToken(cur string, param bool) *Token {
 						continue
 					}
 					keyValue := AutoTokenise(token, ":")
+					if len(keyValue) == 1 {
+						keyValue = append(keyValue, keyValue[0])
+						fmt.Println(JsonStringify(keyValue))
+					}
 					key := strings.TrimSpace(keyValue[0])
-					value := keyValue[1]
+					value := strings.TrimSpace(keyValue[1])
 					if strings.HasPrefix(key, "/@line ") {
 						first, _, _ := strings.Cut(key, "\n")
 						key = strings.Replace(first, "\n", "", 1)
@@ -834,11 +838,6 @@ func (utils *OSLUtils) StringToToken(cur string, param bool) *Token {
 					}
 					if strings.HasPrefix(key, "{") && strings.HasSuffix(key, "}") {
 						key = key[1 : len(key)-1]
-					} else {
-						temp_key := utils.EvalToken(key, true)
-						if temp_key.Type == TKN_STR {
-							key = JsonStringify(key)
-						}
 					}
 					key_ast := utils.GenerateAST(key, 0, false)
 					if len(key_ast) == 0 {

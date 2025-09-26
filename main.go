@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	OSL_VERSION  = "0.1.0"
+	OSL_VERSION  = "0.1.1"
 	OSL_NAME     = "OSL.go"
 	OSL_AUTHOR   = "Mistium"
 	OSL_LICENSE  = "MIT"
@@ -87,13 +87,13 @@ func uninstall() {
 		return
 	}
 
-	fmt.Println("✅ Uninstalled OSL.go from", dest)
+	fmt.Println("Uninstalled OSL.go from", dest)
 }
 
-func open(path string) string {
+func openFile(path string) string {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		fmt.Println(err)
+		fmt.Println("Failed to read file:", err)
 		return ""
 	}
 	return string(data)
@@ -107,7 +107,25 @@ func scriptToAst(script string) [][]*Token {
 
 func scriptToGo(script string) string {
 	ast := scriptToAst(script)
-	return Compile(ast)
+	return "package main\n\n" + Compile(ast)
+}
+
+func copyGoModFiles(srcDir, dstDir string) error {
+	files := []string{"go.mod", "go.sum"}
+	for _, f := range files {
+		src := filepath.Join(srcDir, f)
+		if _, err := os.Stat(src); err == nil {
+			data, err := os.ReadFile(src)
+			if err != nil {
+				return fmt.Errorf("failed to read %s: %w", src, err)
+			}
+			dst := filepath.Join(dstDir, f)
+			if err := os.WriteFile(dst, data, 0644); err != nil {
+				return fmt.Errorf("failed to write %s: %w", dst, err)
+			}
+		}
+	}
+	return nil
 }
 
 func transpile(args []string) {
@@ -117,7 +135,26 @@ func transpile(args []string) {
 	}
 
 	scriptPath := args[0]
-	script := open(scriptPath)
+
+	scriptDir := filepath.Dir(scriptPath)
+	originalDir, err := os.Getwd()
+	if err != nil {
+		fmt.Println("Failed to get current directory:", err)
+		return
+	}
+
+	if err := os.Chdir(scriptDir); err != nil {
+		fmt.Println("Failed to change to script directory:", err)
+		return
+	}
+	defer func() {
+		_ = os.Chdir(originalDir)
+	}()
+
+	script := openFile(filepath.Base(scriptPath))
+	if script == "" {
+		return
+	}
 	fmt.Println(scriptToGo(script))
 }
 
@@ -128,7 +165,26 @@ func compile(args []string) {
 	}
 
 	inputFile := args[0]
-	script := open(inputFile)
+
+	scriptDir := filepath.Dir(inputFile)
+	originalDir, err := os.Getwd()
+	if err != nil {
+		fmt.Println("Failed to get current directory:", err)
+		return
+	}
+
+	if err := os.Chdir(scriptDir); err != nil {
+		fmt.Println("Failed to change to script directory:", err)
+		return
+	}
+	defer func() {
+		_ = os.Chdir(originalDir)
+	}()
+
+	script := openFile(filepath.Base(inputFile))
+	if script == "" {
+		return
+	}
 
 	tmpDir, err := os.MkdirTemp("", "osl-compile-*")
 	if err != nil {
@@ -149,6 +205,10 @@ func compile(args []string) {
 		return
 	}
 
+	if err := copyGoModFiles(cwd, tmpDir); err != nil {
+		fmt.Println("Warning: failed to copy go.mod/go.sum:", err)
+	}
+
 	outputName := strings.TrimSuffix(filepath.Base(inputFile), ".osl")
 	outputPath := filepath.Join(cwd, outputName)
 
@@ -164,6 +224,25 @@ func compile(args []string) {
 	fmt.Printf("Compiled binary: %s\n", outputPath)
 }
 
+func ast(args []string) {
+	if len(args) < 1 {
+		fmt.Println("Usage: osl ast <file.osl>")
+		return
+	}
+	script := openFile(args[0])
+	if script == "" {
+		return
+	}
+	ast := scriptToAst(script)
+	jsonStr := JsonStringify(ast)
+	outPath := args[0] + ".ast.json"
+	if err := os.WriteFile(outPath, []byte(jsonStr), 0644); err != nil {
+		fmt.Println("Failed to write AST file:", err)
+		return
+	}
+	fmt.Println("Wrote AST to", outPath)
+}
+
 func run(args []string) {
 	if len(args) != 1 {
 		fmt.Println("Usage: osl run <file.osl>")
@@ -171,8 +250,26 @@ func run(args []string) {
 	}
 
 	scriptPath := args[0]
-	script := open(scriptPath)
-	ast := scriptToAst(script)
+
+	scriptDir := filepath.Dir(scriptPath)
+	originalDir, err := os.Getwd()
+	if err != nil {
+		fmt.Println("Failed to get current directory:", err)
+		return
+	}
+
+	if err := os.Chdir(scriptDir); err != nil {
+		fmt.Println("Failed to change to script directory:", err)
+		return
+	}
+	defer func() {
+		_ = os.Chdir(originalDir)
+	}()
+
+	script := openFile(filepath.Base(scriptPath))
+	if script == "" {
+		return
+	}
 
 	tmpDir, err := os.MkdirTemp("", "osl-build-*")
 	if err != nil {
@@ -182,12 +279,26 @@ func run(args []string) {
 	defer os.RemoveAll(tmpDir)
 
 	tmpGoFile := filepath.Join(tmpDir, "main.go")
-	if err := os.WriteFile(tmpGoFile, []byte(Compile(ast)), 0644); err != nil {
+	if err := os.WriteFile(tmpGoFile, []byte(scriptToGo(script)), 0644); err != nil {
 		fmt.Println("Failed to write temp Go file:", err)
 		return
 	}
 
-	binaryPath := filepath.Join(tmpDir, "program")
+	cwd, err := os.Getwd()
+	if err == nil {
+		if err := copyGoModFiles(cwd, tmpDir); err != nil {
+			// not fatal
+			fmt.Println("Warning: failed to copy go.mod/go.sum:", err)
+		}
+	}
+
+	// platform-specific binary name
+	binName := "program"
+	if runtime.GOOS == "windows" {
+		binName = "program.exe"
+	}
+	binaryPath := filepath.Join(tmpDir, binName)
+
 	buildCmd := exec.Command("go", "build", "-o", binaryPath, tmpGoFile)
 	buildCmd.Dir = tmpDir
 	output, err := buildCmd.CombinedOutput()
@@ -221,7 +332,7 @@ func main() {
 	case "transpile":
 		transpile(args[2:])
 	case "ast":
-		os.WriteFile(args[2]+".ast.json", []byte(JsonStringify(scriptToAst(open(args[2])))), os.ModePerm)
+		ast(args[2:])
 	case "run":
 		run(args[2:])
 	case "uninstall":

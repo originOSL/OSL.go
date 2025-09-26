@@ -82,12 +82,25 @@ func OSLcastBool(b any) bool {
 	}
 }
 
-// converts go types into types that osl can deal with
 func OSLcastUsable(s any) any {
 	switch s := s.(type) {
-	case string, int, bool, float64, map[string]any, []any:
+	case string, int, bool, float64, map[string]any:
 		return s
+	case []any:
+		result := make([]any, len(s))
+		for i, v := range s {
+			result[i] = OSLcastUsable(v)
+		}
+		return result
 	default:
+		rv := reflect.ValueOf(s)
+		if rv.Kind() == reflect.Slice {
+			result := make([]any, rv.Len())
+			for i := 0; i < rv.Len(); i++ {
+				result[i] = OSLcastUsable(rv.Index(i).Interface())
+			}
+			return result
+		}
 		return fmt.Sprintf("%v", s)
 	}
 }
@@ -109,8 +122,24 @@ func JsonStringify(obj any) string {
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
 	enc.SetEscapeHTML(false)
-	enc.Encode(obj)
-	return strings.TrimSpace(buf.String())
+	if err := enc.Encode(obj); err != nil {
+		return ""
+	}
+	return strings.TrimRight(buf.String(), "\n")
+}
+
+func JsonParse(str string) any {
+	if strings.TrimSpace(str) == "" {
+		return interface{}(nil)
+	}
+
+	var obj any
+	decoder := json.NewDecoder(strings.NewReader(str))
+	decoder.UseNumber()
+	if err := decoder.Decode(&obj); err != nil {
+		return interface{}(nil)
+	}
+	return obj
 }
 
 // Math operation wrappers for OSL behavior
@@ -180,63 +209,6 @@ func OSLjoin(a any, b any) string {
 	return OSLcastString(a) + OSLcastString(b)
 }
 
-// OSLconcat handles ++ operation: concatenates all types without space
-func OSLconcat(a any, b any) any {
-	if ab, ok := a.(bool); ok {
-		a = OSLcastInt(ab)
-	}
-	if bb, ok := b.(bool); ok {
-		b = OSLcastInt(bb)
-	}
-	switch va := a.(type) {
-	case string:
-		switch vb := b.(type) {
-		case string:
-			return OSLcastString(va) + OSLcastString(vb)
-		default:
-			return OSLcastString(va) + OSLcastString(b.(string))
-		}
-	case int:
-		switch vb := b.(type) {
-		case string:
-			return OSLcastString(va) + OSLcastString(vb)
-		case int:
-			return OSLcastInt(va) + OSLcastInt(vb)
-		default:
-			return OSLcastInt(va) + OSLcastInt(b.(int))
-		}
-	case []any:
-		switch vb := b.(type) {
-		case []any:
-			return append(va, vb...)
-		default:
-			return append(va, b)
-		}
-	case map[string]any:
-		switch vb := b.(type) {
-		case string:
-			return "[Object object]" + string(vb)
-		case []any:
-			// merge the array numerical keys into the object
-			for i, v := range vb {
-				va[fmt.Sprintf("%v", i)] = v
-			}
-			return va
-		case map[string]any:
-			// merge the object keys into the object
-			for k, v := range vb {
-				va[k] = v
-			}
-			return va
-		default:
-			return "[Object object]" + fmt.Sprintf("%v", b)
-		}
-	default:
-		// Convert to string and concatenate
-		return fmt.Sprintf("%v", a) + fmt.Sprintf("%v", b)
-	}
-}
-
 // OSLmultiply handles the * operation: multiplies numbers, repeats strings
 func OSLmultiply(a any, b any) any {
 	switch va := a.(type) {
@@ -251,4 +223,50 @@ func OSLmultiply(a any, b any) any {
 		}
 	}
 	return float64(a.(float64)) * float64(b.(float64))
+}
+
+func OSLtrim(s any, from int, to int) string {
+	str := []rune(OSLcastString(s))
+
+	start := from - 1
+	end := to
+
+	if start < 0 {
+		start = 0
+	}
+	if end < 0 {
+		end = len(str) + end + 1
+	}
+
+	if start > len(str) {
+		start = len(str)
+	}
+	if end > len(str) {
+		end = len(str)
+	}
+
+	if start > end {
+		start, end = end, start
+	}
+
+	return string(str[start:end])
+}
+
+func OSLtypeof(s any) string {
+	switch s.(type) {
+	case string:
+		return "string"
+	case int:
+		return "int"
+	case float64:
+		return "number"
+	case bool:
+		return "boolean"
+	case map[string]any:
+		return "object"
+	case []any:
+		return "array"
+	default:
+		return "any"
+	}
 }

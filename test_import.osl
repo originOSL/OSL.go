@@ -1,0 +1,5 @@
+import "./test_utils.osl"
+
+def main() (
+    log greet("World")
+)
