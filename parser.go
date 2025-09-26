@@ -1138,8 +1138,8 @@ func (utils *OSLUtils) GenerateAST(code string, start int, main bool) []*Token {
 					var funcBody *Token
 					returnType := ""
 
-					if len(ast) > 2 && ast[2].Type == TKN_VAR {
-						returnType = ast[2].Data.(string)
+					if len(ast) > 2 && ast[2].Type != TKN_BLK {
+						returnType = ast[2].Source
 						if len(ast) > 3 {
 							funcBody = ast[3]
 						}
