@@ -1,6 +1,9 @@
 // This is a set of funtions that are used in the compiler for OSL.go
 
 func OSLlen(s any) int {
+	if s == nil {
+		return 0
+	}
 	switch s := s.(type) {
 	case string:
 		return len(s)
@@ -35,7 +38,7 @@ func OSLlen(s any) int {
 	if v.Kind() == reflect.String {
 		return len(v.String())
 	}
-	panic("OSLlen: invalid type" + v.Kind().String())
+	panic("OSLlen, invalid type: " + v.Kind().String())
 }
 
 func OSLcastString(s any) string {
@@ -77,13 +80,25 @@ func OSLcastObject(s any) map[string]any {
 	}
 }
 
-func OSLcastArray(s any) []any {
-	switch s := s.(type) {
-	case []any:
-		return s
-	default:
-		panic("OSLcastArray: invalid type")
+func OSLcastArray(values ...any) []any {
+	if len(values) == 1 {
+		v := reflect.ValueOf(values[0])
+		if v.Kind() == reflect.Ptr {
+			if v.IsNil() {
+				return []any{}
+			}
+			v = v.Elem()
+		}
+		if v.Kind() == reflect.Slice || v.Kind() == reflect.Array {
+			out := make([]any, v.Len())
+			for i := 0; i < v.Len(); i++ {
+				out[i] = v.Index(i).Interface()
+			}
+			return out
+		}
+		return []any{values[0]}
 	}
+	return values
 }
 
 func OSLequal(a any, b any) bool {
@@ -101,6 +116,9 @@ func OSLnotEqual(a any, b any) bool {
 }
 
 func OSLcastInt(i any) int {
+	if i == nil {
+		return 0
+	}
 	switch i := i.(type) {
 	case string:
 		f, _ := strconv.ParseFloat(string(i), 64)
@@ -126,7 +144,7 @@ func OSLcastInt(i any) int {
 		f, _ := i.Float64()
 		return int(f)
 	default:
-		return int(i.(int))
+		panic("OSLcastInt, invalid type: " + reflect.TypeOf(i).String())
 	}
 }
 
@@ -153,6 +171,10 @@ func OSLcastNumber(n any) float64 {
 }
 
 func OSLcastBool(b any) bool {
+	if b == nil {
+		return false
+	}
+
 	switch b := b.(type) {
 	case string:
 		return len(b) > 0
@@ -165,7 +187,11 @@ func OSLcastBool(b any) bool {
 	case map[string]any:
 		return len(b) > 0
 	default:
-		return b.(bool)
+		v := reflect.ValueOf(b)
+		if v.Kind() == reflect.Ptr && !v.IsNil() {
+			return OSLcastBool(v.Elem().Interface())
+		}
+		panic("OSLcastBool, invalid type: " + v.Kind().String())
 	}
 }
 
@@ -227,6 +253,17 @@ func JsonParse(str string) any {
 		return interface{}(nil)
 	}
 	return obj
+}
+
+func JsonFormat(obj any) string {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(obj); err != nil {
+		return ""
+	}
+	return strings.TrimRight(buf.String(), "\n")
 }
 
 // Math operation wrappers for OSL behavior
@@ -336,7 +373,21 @@ func OSLmultiply(a any, b any) any {
 			return strings.Repeat(string(va), count)
 		}
 	}
-	return float64(a.(float64)) * float64(b.(float64))
+	return OSLcastNumber(a) * OSLcastNumber(b)
+}
+
+func OSLround(n any) int {
+	if n == nil {
+		return 0
+	}
+	switch n := n.(type) {
+	case int:
+		return n
+	case float64:
+		return int(n + 0.5)
+	default:
+		panic("OSLround, invalid type: " + reflect.TypeOf(n).String())
+	}
 }
 
 func OSLtrim(s any, from int, to int) string {
@@ -364,6 +415,47 @@ func OSLtrim(s any, from int, to int) string {
 	}
 
 	return string(str[start:end])
+}
+
+func OSLslice(s any, start int, end int) []any {
+	arr := OSLcastArray(s)
+	n := len(arr)
+
+	start = start - 1
+	if start < 0 {
+		start = 0
+	} else if start > n {
+		start = n
+	}
+
+	if end < 0 {
+		end = n + end + 1
+	}
+	if end > n {
+		end = n
+	} else if end < 0 {
+		end = 0
+	}
+
+	if start > end {
+		start, end = end, start
+	}
+
+	return arr[start:end]
+}
+
+func OSLpadStart(s string, length int, pad string) string {
+	if len(s) >= length {
+		return s
+	}
+	return strings.Repeat(pad, length-len(s)) + s
+}
+
+func OSLpadEnd(s string, length int, pad string) string {
+	if len(s) >= length {
+		return s
+	}
+	return s + strings.Repeat(pad, length-len(s))
 }
 
 func OSLtypeof(s any) string {

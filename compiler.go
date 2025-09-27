@@ -144,16 +144,26 @@ func Compile(ast [][]*Token) string {
 	if len(goImports) > 0 {
 		seen := make(map[string]bool)
 		var uniqueImports []string
+
 		for _, pkg := range goImports {
-			if !seen[pkg] {
-				seen[pkg] = true
-				uniqueImports = append(uniqueImports, pkg)
+			if seen[pkg] {
+				continue
+			}
+			seen[pkg] = true
+
+			if strings.Contains(pkg, " as ") {
+				parts := strings.Split(pkg, " as ")
+				actualPkg := strings.TrimSpace(parts[0])
+				alias := strings.TrimSpace(parts[1])
+				uniqueImports = append(uniqueImports, fmt.Sprintf("%s %q", alias, actualPkg))
+			} else {
+				uniqueImports = append(uniqueImports, fmt.Sprintf("%q", strings.TrimSpace(pkg)))
 			}
 		}
 
 		prepend += "import (\n"
-		for _, pkg := range uniqueImports {
-			prepend += fmt.Sprintf("\t%q\n", pkg)
+		for _, imp := range uniqueImports {
+			prepend += "\t" + imp + "\n"
 		}
 		prepend += ")\n\n"
 	}
@@ -219,18 +229,24 @@ func CompileToken(token *Token, ctx VariableContext) string {
 			ctx.Indent++
 			params_string := ""
 			if len(token.Right.Parameters) > 0 {
-				params_token := strings.TrimSpace(token.Right.Parameters[0].Data.(string))
-				if len(params_token) > 0 {
-					params := strings.Split(params_token, ",")
-					for i, param := range params {
-						param = strings.TrimSpace(param)
-						params_string += param
-						if i < len(params)-1 {
-							params_string += ", "
-						}
+				params := token.Right.Parameters
+				args := strings.Split(params[0].Data.(string), ",")
+				for i, arg := range args {
+					args[i] = strings.TrimSpace(arg)
+					if args[i] == "" {
+						continue
 					}
+					parts := strings.Split(args[i], " ")
+					typeName := "any"
+					varName := args[i]
+					if len(parts) > 1 {
+						typeName = mapOSLTypeToGo(parts[1])
+						varName = parts[0]
+					}
+					params_string += fmt.Sprintf("%v %v, ", varName, typeName)
 				}
 			}
+			params_string = strings.TrimSuffix(params_string, ", ")
 			returns := ""
 			if token.Right.Returns != "" {
 				returns = mapOSLTypeToGo(token.Right.Returns) + " "
@@ -547,9 +563,23 @@ func CompileToken(token *Token, ctx VariableContext) string {
 			ctx.Indent++
 			paramString := ""
 			if len(params) > 0 {
-				paramString = params[0].Data.(string)
+				args := strings.Split(params[0].Data.(string), ",")
+				for i, arg := range args {
+					args[i] = strings.TrimSpace(arg)
+					if args[i] == "" {
+						continue
+					}
+					parts := strings.Split(args[i], " ")
+					typeName := "any"
+					varName := args[i]
+					if len(parts) > 1 {
+						typeName = mapOSLTypeToGo(parts[1])
+						varName = parts[0]
+					}
+					paramString += fmt.Sprintf("%v %v, ", varName, typeName)
+				}
 			}
-			out := fmt.Sprintf("func(%v) {\n", paramString)
+			out := fmt.Sprintf("func(%v) {\n", strings.TrimSuffix(paramString, ", "))
 			ctx.Indent++
 			if len(params) > 1 {
 				blk := params[1]
@@ -569,21 +599,9 @@ func CompileToken(token *Token, ctx VariableContext) string {
 			if len(token.Parameters) > 0 {
 				return fmt.Sprintf("OSLdelete(%v, %v)", CompileToken(token.Parameters[0], ctx), CompileToken(token.Parameters[1], ctx))
 			}
-		case "writeContentLocked":
-			if len(token.Parameters) > 1 {
-				contentParam := CompileToken(token.Parameters[1], ctx)
-				if strings.Contains(contentParam, "OSLgetItem(") && !strings.Contains(contentParam, "OSLcastString(") {
-					contentParam = fmt.Sprintf("OSLcastString(%v)", contentParam)
-				}
-				return fmt.Sprintf("writeContentLocked(%v, %v)", CompileToken(token.Parameters[0], ctx), contentParam)
-			}
-		case "filepath.Base":
+		case "round":
 			if len(token.Parameters) > 0 {
-				param := CompileToken(token.Parameters[0], ctx)
-				if strings.Contains(param, "OSLgetItem(") && !strings.Contains(param, "OSLcastString(") {
-					param = fmt.Sprintf("OSLcastString(%v)", param)
-				}
-				return fmt.Sprintf("filepath.Base(%v)", param)
+				return fmt.Sprintf("OSLround(%v)", CompileToken(token.Parameters[0], ctx))
 			}
 		default:
 			paramString := ""
@@ -662,6 +680,14 @@ func CompileToken(token *Token, ctx VariableContext) string {
 					out = fmt.Sprintf("OSLcastNumber(%v)", out)
 				case "toBool":
 					out = fmt.Sprintf("OSLcastBool(%v)", out)
+				case "toArray":
+					out = fmt.Sprintf("OSLcastArray(%v)", out)
+				case "toObject":
+					out = fmt.Sprintf("OSLcastObject(%v)", out)
+				case "to":
+					if len(params) > 1 {
+						out = fmt.Sprintf("OSLto(%v, %v)", out, params[0])
+					}
 				case "append":
 					if len(params) > 0 {
 						out = fmt.Sprintf("append(%v, %v)", out, params[0])
@@ -718,19 +744,43 @@ func CompileToken(token *Token, ctx VariableContext) string {
 					if len(params) > 0 {
 						out = fmt.Sprintf("strings.Split(%v, %v)", out, params[0])
 					}
+				case "slice":
+					if len(params) > 1 {
+						out = fmt.Sprintf("OSLslice(%v, %v, %v)", out, params[0], params[1])
+					} else if len(params) > 0 {
+						out = fmt.Sprintf("OSLslice(%v, %v, -1)", out, params[0])
+					}
 				case "trim":
 					if len(params) > 1 {
 						out = fmt.Sprintf("OSLtrim(%v, %v, %v)", out, params[0], params[1])
 					} else if len(params) > 0 {
 						out = fmt.Sprintf("OSLtrim(%v, %v, -1)", out, params[0])
 					} else {
-						out = fmt.Sprintf("strings.trimSpace(%v)", out)
+						out = fmt.Sprintf("strings.TrimSpace(%v)", out)
 					}
 				case "JsonStringify":
 					out = fmt.Sprintf("JsonStringify(%v)", out)
 				case "JsonParse":
 					out = fmt.Sprintf("JsonParse(%v)", out)
-				case "@":
+				case "JsonFormat":
+					out = fmt.Sprintf("JsonFormat(%v)", out)
+				case "stripStart":
+					if len(params) > 0 {
+						out = fmt.Sprintf("strings.TrimPrefix(%v, %v)", out, params[0])
+					}
+				case "stripEnd":
+					if len(params) > 0 {
+						out = fmt.Sprintf("strings.TrimSuffix(%v, %v)", out, params[0])
+					}
+				case "padStart":
+					if len(params) > 1 {
+						out = fmt.Sprintf("OSLpadStart(%v, int(OSLcastNumber(%v)), %v)", out, params[1], params[0])
+					}
+				case "padEnd":
+					if len(params) > 1 {
+						out = fmt.Sprintf("OSLpadEnd(%v, int(OSLcastNumber(%v)), %v)", out, params[1], params[0])
+					}
+				case "assert":
 					if len(params) > 0 {
 						paramStr := strings.Trim(params[0], "\"")
 						goType := mapOSLTypeToGo(paramStr)
@@ -833,6 +883,18 @@ func CompileCmd(cmd []*Token, ctx VariableContext) string {
 				break
 			}
 		}
+	case "loop":
+		if len(cmd) < 3 {
+			panic("Loop command requires at least 1 parameter")
+		}
+		var iteratorVar string = "i_" + RandomString(5)
+		loopNumber := CompileToken(cmd[1], ctx)
+		blk := cmd[2]
+		ctx.Indent++
+		out += fmt.Sprintf("for %v := 1; %v <= %v; %v++ {\n", iteratorVar, iteratorVar, loopNumber, iteratorVar)
+		out += CompileBlock(blk.Data.([][]*Token), ctx)
+		ctx.Indent--
+		out += AddIndent("}", ctx.Indent*2)
 	case "for":
 		if len(cmd) < 3 {
 			panic("For command requires at least 2 parameters")

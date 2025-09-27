@@ -1,7 +1,7 @@
 // name: arrays
 // description: Array utilities
 // author: Mist
-// requires: os, sort
+// requires: sort
 
 type Arrays struct{}
 

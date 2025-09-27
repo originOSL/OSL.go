@@ -1218,7 +1218,7 @@ func (utils *OSLUtils) GenerateAST(code string, start int, main bool) []*Token {
 			if i > 1 && len(ast) > i-2 {
 				if ast[i-2] != nil {
 					if data, ok := ast[i-2].Data.(string); ok {
-						cur.SetType = strings.ToLower(data)
+						cur.SetType = data
 						ast = append(ast[:i-2], ast[i-1:]...)
 						i--
 					}

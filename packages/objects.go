@@ -1,7 +1,7 @@
 // name: objects
 // description: Object utilities
 // author: Mist
-// requires: os, sort
+// requires: os
 
 type Objects struct{}
 
@@ -69,8 +69,8 @@ func (Objects) Values(obj map[string]any) []any {
 	return values
 }
 
-func (Objects) Has(obj map[string]any, key string) bool {
-	_, ok := obj[key]
+func (Objects) Has(obj map[string]any, key any) bool {
+	_, ok := obj[OSLcastString(key)]
 	return ok
 }
 

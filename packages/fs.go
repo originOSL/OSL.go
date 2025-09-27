@@ -60,6 +60,62 @@ func (FS) ReadDir(path any) []string {
 	return names
 }
 
+func (FS) ReadDirAll(path any) []map[string]any {
+	dir := OSLcastString(path)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return []map[string]any{}
+	}
+
+	filesOut := make([]map[string]any, len(entries))
+	for i, f := range entries {
+		filesOut[i] = map[string]any{
+			"name":  f.Name(),
+			"ext":   filepath.Ext(f.Name()),
+			"path":  filepath.Join(dir, f.Name()),
+			"isDir": f.IsDir(),
+			"type":  f.Type(),
+		}
+	}
+
+	return filesOut
+}
+
+func (FS) WalkDir(path any, fn func(path string, file map[string]any, control map[string]any)) {
+	dir := OSLcastString(path)
+	filepath.WalkDir(dir, func(p string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+
+		fileData := map[string]any{
+			"name":    entry.Name(),
+			"ext":     filepath.Ext(entry.Name()),
+			"path":    p,
+			"isDir":   entry.IsDir(),
+			"size":    info.Size(),
+			"mode":    info.Mode(),
+			"modTime": info.ModTime(),
+			"sys":     info.Sys(),
+			"type":    entry.Type(),
+		}
+
+		control := map[string]any{
+			"skip": false,
+		}
+		fn(p, fileData, control)
+		if control["skip"] == true {
+			return filepath.SkipDir
+		}
+		return nil
+	})
+}
+
 func (FS) IsDir(path any) bool {
 	info, err := os.Stat(OSLcastString(path))
 	if err != nil {
