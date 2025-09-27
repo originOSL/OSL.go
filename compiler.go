@@ -125,6 +125,7 @@ func Compile(ast [][]*Token) string {
 			"bufio":         true,
 			"os":            true,
 			"reflect":       true,
+			"io":            true,
 		},
 		ImportOrder:   []string{},
 		DeclaredVars:  make(map[string]bool),
@@ -334,6 +335,12 @@ func CompileToken(token *Token, ctx VariableContext) string {
 					if !strings.HasPrefix(compiledRight, "OSLcastBool(") {
 						compiledRight = fmt.Sprintf("bool(%v)", compiledRight)
 					}
+				case "array":
+					if strings.HasPrefix(compiledRight, "[]any{") {
+						ctx.VariableTypes[varName] = "[]any"
+					} else if !strings.HasPrefix(compiledRight, "OSLcastArray(") {
+						compiledRight = fmt.Sprintf("OSLcastArray(%v)", compiledRight)
+					}
 				case "object":
 					if strings.HasPrefix(compiledRight, "map[string]any{") {
 						ctx.VariableTypes[varName] = "map[string]any"
@@ -363,7 +370,7 @@ func CompileToken(token *Token, ctx VariableContext) string {
 				leftVar := token.Left.Data.(string)
 				expectedType := ctx.VariableTypes[leftVar]
 
-				if expectedType != "" && strings.Contains(compiledRight, "OSLgetItem(") {
+				if expectedType != "" && strings.HasPrefix(compiledRight, "OSLgetItem(") {
 					switch expectedType {
 					case "map[string]any":
 						compiledRight = fmt.Sprintf("%v.(map[string]any)", compiledRight)
