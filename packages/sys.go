@@ -75,4 +75,13 @@ func (OS) GetHomeDir() string {
 	return user.HomeDir
 }
 
+func (OS) CMD(cmd string, args ...string) string {
+	cmdArgs := append([]string{cmd}, args...)
+	out, err := exec.Command(cmdArgs[0], cmdArgs[1:]...).Output()
+	if err != nil {
+		return ""
+	}
+	return string(out)
+}
+
 var sys = OS{}
