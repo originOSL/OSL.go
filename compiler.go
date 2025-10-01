@@ -490,6 +490,8 @@ func CompileToken(token *Token, ctx VariableContext) string {
 			return "nil"
 		case "timestamp":
 			return "time.Now().UnixMilli()"
+		case "performance":
+			return "time.Now().UnixMicro()"
 		}
 		return varName
 	case TKN_RAW:

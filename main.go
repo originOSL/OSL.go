@@ -42,11 +42,13 @@ func setup() {
 
 	exePath, err := os.Executable()
 	if err != nil {
-		panic(err)
+		fmt.Println("Error getting executable path:", err)
+		return
 	}
 	exePath, err = filepath.EvalSymlinks(exePath)
 	if err != nil {
-		panic(err)
+		fmt.Println("Error resolving symlinks:", err)
+		return
 	}
 
 	dest := "/usr/local/bin/osl"
@@ -55,11 +57,14 @@ func setup() {
 		return
 	}
 
-	cmd := exec.Command("sudo", "mv", exePath, dest)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		fmt.Println("Failed to move binary:", err)
+	data, err := os.ReadFile(exePath)
+	if err != nil {
+		fmt.Println("Failed to read binary:", err)
+		return
+	}
+
+	if err := os.WriteFile(dest, data, 0755); err != nil {
+		fmt.Println("Failed to install binary (try running with sudo):", err)
 		return
 	}
 
