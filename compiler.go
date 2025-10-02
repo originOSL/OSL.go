@@ -489,9 +489,11 @@ func CompileToken(token *Token, ctx VariableContext) string {
 		case "null":
 			return "nil"
 		case "timestamp":
-			return "time.Now().UnixMilli()"
+			ctx.Imports["time"] = true
+			return "int(time.Now().UnixMilli())"
 		case "performance":
-			return "time.Now().UnixMicro()"
+			ctx.Imports["time"] = true
+			return "float64(time.Now().UnixMicro())"
 		}
 		return varName
 	case TKN_RAW:

@@ -1,7 +1,7 @@
 // name: sys
 // description: OS utilities
 // author: Mist
-// requires: os/user, os
+// requires: os/user, os, os/exec
 
 type OS struct{}
 
