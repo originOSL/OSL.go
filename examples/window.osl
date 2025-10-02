@@ -1,0 +1,18 @@
+import "osl/window"
+
+def example(*OSLWindow window) (
+  window.SetTitle("Hello OSL")
+  window.Resize(800, 600)
+  window.Goto(0, 0)
+
+  mainloop: window (
+    c "#ffffff"
+
+    goto window.left() + 10 window.top() - 20
+    text "hello world" 10
+  )
+)
+
+def main() (
+  window.Create(example)
+)

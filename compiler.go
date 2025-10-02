@@ -2,7 +2,10 @@ package main
 
 import (
 	"embed"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"regexp"
 	"sort"
@@ -98,6 +101,29 @@ func processImports(ctx VariableContext) (compiled string, goImports []string) {
 						goImports = append(goImports, part)
 					}
 				}
+			}
+			if importPath == "osl/window" {
+				fontUrl := "https://raw.githubusercontent.com/Mistium/Origin-OS/main/Fonts/origin.ojff"
+
+				resp, err := http.Get(fontUrl)
+				if err != nil {
+					panic(err)
+				}
+				defer resp.Body.Close()
+
+				data, err := io.ReadAll(resp.Body)
+				if err != nil {
+					panic(err)
+				}
+
+				var fontMap map[string]any
+				err = json.Unmarshal(data, &fontMap)
+				if err != nil {
+					panic(err)
+				}
+				delete(fontMap, "origin")
+
+				compiled = "\n\nvar OSLfont = map[string]string" + JsonStringify(fontMap) + "\n\n" + compiled
 			}
 			compiled = "\n" + file + compiled
 
@@ -980,6 +1006,43 @@ func CompileCmd(cmd []*Token, ctx VariableContext) string {
 		for i := 1; i < len(cmd); i++ {
 			out += CompileToken(cmd[i], ctx)
 		}
+	case "c", "color", "colour":
+		if len(cmd) < 2 {
+			panic("Color command requires at least 1 parameter")
+		}
+		out += "OSLdrawctx.Color(" + CompileToken(cmd[1], ctx) + ")"
+	case "goto":
+		if len(cmd) != 3 {
+			panic("Goto command requires 2 parameters")
+		}
+		out += "OSLdrawctx.Goto(" + CompileToken(cmd[1], ctx) + ", " + CompileToken(cmd[2], ctx) + ")"
+	case "square":
+		if len(cmd) < 3 {
+			panic("Square command requires at least 2 parameters")
+		}
+		out += "OSLdrawctx.Rect("
+		for i := 1; i < len(cmd); i++ {
+			out += CompileToken(cmd[i], ctx) + ", "
+		}
+		out += ")"
+	case "icon":
+		if len(cmd) != 3 {
+			panic("Icon command requires 2 parameters")
+		}
+		out += "OSLdrawctx.Icon(" + CompileToken(cmd[1], ctx) + ", " + CompileToken(cmd[2], ctx) + ")"
+	case "text":
+		if len(cmd) < 3 {
+			panic("Text command requires at least 2 parameters")
+		}
+		out += "OSLdrawctx.Text(" + CompileToken(cmd[1], ctx) + ", " + CompileToken(cmd[2], ctx) + ")"
+	case "mainloop:":
+		if len(cmd) != 3 {
+			panic("Mainloop command requires 2 parameters")
+		}
+		winVar := cmd[1].Data.(string)
+		out += winVar + ".Run(func(" + winVar + " *OSLWindow) {\n"
+		out += AddIndent(CompileBlock(cmd[2].Data.([][]*Token), ctx), ctx.Indent*2)
+		out += "})"
 	default:
 		out += cmd[0].Data.(string)
 		if len(cmd) > 1 {
@@ -996,13 +1059,14 @@ func CompileObject(obj [][]*Token, ctx VariableContext) string {
 	var out string = "map[string]any{\n"
 	for _, token := range obj {
 		keyStr := ""
-		if token[0].Type == TKN_VAR {
+		switch token[0].Type {
+		case TKN_VAR:
 			// In object literals, variable names should be treated as string keys
 			keyStr = fmt.Sprintf("\"%v\"", token[0].Data)
-		} else if token[0].Type == TKN_STR {
+		case TKN_STR:
 			// String keys should be used as-is
 			keyStr = CompileToken(token[0], ctx)
-		} else {
+		default:
 			// Other expressions should be evaluated and used as keys
 			keyStr = CompileToken(token[0], ctx)
 		}

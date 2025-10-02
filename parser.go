@@ -818,7 +818,7 @@ func (utils *OSLUtils) StringToToken(cur string, param bool) *Token {
 		}
 	}
 
-	matched := regexp.MustCompile(`^(!+)?[a-zA-Z_][a-zA-Z0-9_]*$`).MatchString(cur)
+	matched := regexp.MustCompile(`^(!+)?[a-zA-Z_][a-zA-Z0-9_]*:?$`).MatchString(cur)
 
 	if matched {
 		return &Token{Type: TKN_VAR, Data: cur}
