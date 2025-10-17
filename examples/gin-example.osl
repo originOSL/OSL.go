@@ -1,7 +1,6 @@
 import "os"
 import "github.com/gin-gonic/gin"
 
-
 def main() (
     string port = os.Getenv("PORT")
 
@@ -11,7 +10,7 @@ def main() (
     )
 
     // Starts a new Gin instance with no middle-ware
-    r = gin.New()
+    r := gin.New()
 
     // Define handlers
     r.GET("/", def(*gin.Context c) -> (
@@ -23,5 +22,5 @@ def main() (
 
     // Listen and serve on defined port
     log "Listening on port" port
-    r.Run((":" ++ port).toStr())
+    r.Run(":" ++ port)
 )
