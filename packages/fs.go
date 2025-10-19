@@ -13,6 +13,14 @@ func (FS) ReadFile(path any) string {
 	return string(data)
 }
 
+func (FS) ReadFileBytes(path any) []byte {
+	data, err := os.ReadFile(OSLcastString(path))
+	if err != nil {
+		return []byte{}
+	}
+	return data
+}
+
 func (FS) WriteFile(path any, data any) bool {
 	err := os.WriteFile(OSLcastString(path), []byte(OSLcastString(data)), 0644)
 	return err == nil
@@ -160,6 +168,40 @@ func (FS) GetExt(path any) string {
 func (FS) GetParts(path any) []string {
 	stringPath := OSLcastString(path)
 	return []string{filepath.Base(stringPath), filepath.Dir(stringPath), filepath.Ext(stringPath)}
+}
+
+func (FS) GetSize(path any) int64 {
+	info, err := os.Stat(OSLcastString(path))
+	if err != nil {
+		return 0
+	}
+	return info.Size()
+}
+
+func (FS) GetModTime(path any) int64 {
+	info, err := os.Stat(OSLcastString(path))
+	if err != nil {
+		return 0
+	}
+	return info.ModTime().UnixMilli()
+}
+
+func (FS) GetStat(path any) map[string]any {
+	info, err := os.Stat(OSLcastString(path))
+	if err != nil {
+		return map[string]any{"success": false}
+	}
+	return map[string]any{
+		"success": true,
+		"name":    filepath.Base(info.Name()),
+		"ext":     filepath.Ext(info.Name()),
+		"path":    info.Name(),
+		"isDir":   info.IsDir(),
+		"size":    info.Size(),
+		"mode":    info.Mode(),
+		"modTime": info.ModTime().UnixMicro(),
+		"sys":     info.Sys(),
+	}
 }
 
 // Global instance

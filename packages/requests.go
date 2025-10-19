@@ -36,12 +36,19 @@ func extractHeadersAndBody(data map[string]any) (headers map[string]string, body
 	return headers, body
 }
 
-func (h *HTTP) doRequest(method, url string, data map[string]any) string {
+func (h *HTTP) doRequest(method, url string, data map[string]any) map[string]any {
 	headers, body := extractHeadersAndBody(data)
+
+	out := make(map[string]any)
+	out["headers"] = nil
+	out["body"] = nil
+	out["raw"] = nil
+	out["status"] = 0
+	out["success"] = false
 
 	req, err := http.NewRequest(method, url, body)
 	if err != nil {
-		return ""
+		return out
 	}
 
 	for k, v := range headers {
@@ -50,19 +57,35 @@ func (h *HTTP) doRequest(method, url string, data map[string]any) string {
 
 	resp, err := h.Client.Do(req)
 	if err != nil {
-		return ""
+		return out
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return ""
+	respHeaders := make(map[string]any)
+	for k, v := range resp.Header {
+		if len(v) == 1 {
+			respHeaders[k] = v[0]
+		} else {
+			respHeaders[k] = v
+		}
 	}
 
-	return string(respBody)
+	out["status"] = resp.StatusCode
+	out["headers"] = respHeaders
+	out["raw"] = resp
+	out["success"] = true
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return out
+	}
+
+	out["body"] = respBody
+
+	return out
 }
 
-func (h *HTTP) Get(url string, data ...map[string]any) string {
+func (h *HTTP) Get(url string, data ...map[string]any) map[string]any {
 	var m map[string]any
 	if len(data) > 0 {
 		m = data[0]
@@ -70,19 +93,19 @@ func (h *HTTP) Get(url string, data ...map[string]any) string {
 	return h.doRequest(http.MethodGet, url, m)
 }
 
-func (h *HTTP) Post(url string, data map[string]any) string {
+func (h *HTTP) Post(url string, data map[string]any) map[string]any {
 	return h.doRequest(http.MethodPost, url, data)
 }
 
-func (h *HTTP) Put(url string, data map[string]any) string {
+func (h *HTTP) Put(url string, data map[string]any) map[string]any {
 	return h.doRequest(http.MethodPut, url, data)
 }
 
-func (h *HTTP) Patch(url string, data map[string]any) string {
+func (h *HTTP) Patch(url string, data map[string]any) map[string]any {
 	return h.doRequest(http.MethodPatch, url, data)
 }
 
-func (h *HTTP) Delete(url string, data ...map[string]any) string {
+func (h *HTTP) Delete(url string, data ...map[string]any) map[string]any {
 	var m map[string]any
 	if len(data) > 0 {
 		m = data[0]
@@ -90,7 +113,7 @@ func (h *HTTP) Delete(url string, data ...map[string]any) string {
 	return h.doRequest(http.MethodDelete, url, m)
 }
 
-func (h *HTTP) Options(url string, data ...map[string]any) string {
+func (h *HTTP) Options(url string, data ...map[string]any) map[string]any {
 	var m map[string]any
 	if len(data) > 0 {
 		m = data[0]
@@ -98,25 +121,28 @@ func (h *HTTP) Options(url string, data ...map[string]any) string {
 	return h.doRequest(http.MethodOptions, url, m)
 }
 
-func (h *HTTP) Head(url string, data ...map[string]any) string {
+func (h *HTTP) Head(url string, data ...map[string]any) map[string]any {
 	var m map[string]any
 	if len(data) > 0 {
 		m = data[0]
 	}
+	out := map[string]any{"success": false}
 	headers, _ := extractHeadersAndBody(m)
 	req, err := http.NewRequest(http.MethodHead, url, nil)
 	if err != nil {
-		return ""
+		return out
 	}
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
 	resp, err := h.Client.Do(req)
 	if err != nil {
-		return ""
+		return out
 	}
+	out["status"] = resp.StatusCode
 	defer resp.Body.Close()
-	return resp.Status
+	out["success"] = true
+	return out
 }
 
 var requests = &HTTP{Client: http.DefaultClient}

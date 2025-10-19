@@ -155,6 +155,8 @@ func OSLcastNumber(n any) float64 {
 		return f
 	case int:
 		return float64(n)
+	case int64:
+		return float64(n)
 	case float64:
 		return n
 	case bool:
@@ -361,18 +363,7 @@ func OSLjoin(a any, b any) string {
 }
 
 // OSLmultiply handles the * operation: multiplies numbers, repeats strings
-func OSLmultiply(a any, b any) any {
-	switch va := a.(type) {
-	case string:
-		switch vb := b.(type) {
-		case int:
-			count := int(vb)
-			if count <= 0 {
-				return ""
-			}
-			return strings.Repeat(string(va), count)
-		}
-	}
+func OSLmultiply(a any, b any) float64 {
 	return OSLcastNumber(a) * OSLcastNumber(b)
 }
 

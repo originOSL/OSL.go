@@ -152,8 +152,21 @@ func Compile(ast [][]*Token) string {
 			"os":            true,
 			"reflect":       true,
 			"io":            true,
+			"time":          true,
 		},
-		ImportOrder:   []string{},
+		ImportOrder: []string{
+			"fmt",
+			"math/rand",
+			"strconv",
+			"strings",
+			"bytes",
+			"encoding/json",
+			"bufio",
+			"os",
+			"reflect",
+			"io",
+			"time",
+		},
 		DeclaredVars:  make(map[string]bool),
 		VariableTypes: make(map[string]string),
 	}
@@ -194,6 +207,7 @@ func Compile(ast [][]*Token) string {
 		prepend += ")\n\n"
 	}
 
+	prepend += "var wincreatetime float64 = OSLcastNumber(time.Now().UnixMilli())\n\n"
 	prepend += include("packages/std.go")
 
 	return prepend + importsCompiled + mainCompiled
@@ -515,11 +529,9 @@ func CompileToken(token *Token, ctx VariableContext) string {
 		case "null":
 			return "nil"
 		case "timestamp":
-			ctx.Imports["time"] = true
-			return "int(time.Now().UnixMilli())"
+			return "OSLcastNumber(time.Now().UnixMilli())"
 		case "performance":
-			ctx.Imports["time"] = true
-			return "float64(time.Now().UnixMicro())"
+			return "OSLcastNumber(time.Now().UnixMicro())"
 		}
 		return varName
 	case TKN_RAW:
@@ -633,6 +645,10 @@ func CompileToken(token *Token, ctx VariableContext) string {
 			if len(token.Parameters) > 0 {
 				return fmt.Sprintf("OSLround(%v)", CompileToken(token.Parameters[0], ctx))
 			}
+		case "raw":
+			if len(token.Parameters) > 0 {
+				return fmt.Sprintf("%v", token.Parameters[0].Data)
+			}
 		default:
 			paramString := ""
 			if len(token.Parameters) > 0 {
@@ -647,10 +663,14 @@ func CompileToken(token *Token, ctx VariableContext) string {
 		}
 	case TKN_URY:
 		op := token.Data
+		value := CompileToken(token.Right, ctx)
 		if op == "@" {
 			op = "&"
 		}
-		return fmt.Sprintf("%v%v", op, CompileToken(token.Right, ctx))
+		if op == "!" {
+			return fmt.Sprintf("(%v != true)", value)
+		}
+		return fmt.Sprintf("%v%v", op, value)
 	case TKN_MTV:
 		params := make([]string, len(token.Parameters))
 		for i, p := range token.Parameters {
