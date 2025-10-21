@@ -786,6 +786,8 @@ func CompileToken(token *Token, ctx VariableContext) string {
 					}
 				case "strip":
 					out = fmt.Sprintf("strings.TrimSpace(%v)", out)
+				case "clone":
+					out = fmt.Sprintf("OSLclone(%v)", out)
 				case "FormFile":
 					if len(params) > 0 {
 						out = fmt.Sprintf("func() *multipart.FileHeader { f, err := %v.FormFile(%v); if err != nil { return nil }; return f }()", out, params[0])

@@ -732,3 +732,21 @@ func OSLprepend(a *[]any, b any) []any {
 	return *a
 }
 
+func OSLclone(a any) any {
+	switch a := a.(type) {
+	case map[string]any:
+		b := make(map[string]any, len(a))
+		for k, v := range a {
+			b[k] = OSLclone(v)
+		}
+		return b
+	case []any:
+		b := make([]any, len(a))
+		for i, v := range a {
+			b[i] = OSLclone(v)
+		}
+		return b
+	default:
+		return a
+	}
+}
