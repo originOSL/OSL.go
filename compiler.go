@@ -893,6 +893,8 @@ func CompileToken(token *Token, ctx VariableContext) string {
 func CompileCmd(cmd []*Token, ctx VariableContext) string {
 	var out string
 	switch cmd[0].Data {
+	case "//":
+		return ""
 	case "if":
 		if len(cmd) < 3 {
 			panic("If command requires at least 2 parameters")
