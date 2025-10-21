@@ -82,7 +82,13 @@ func OSLcastObject(s any) map[string]any {
 
 func OSLcastArray(values ...any) []any {
 	if len(values) == 1 {
-		v := reflect.ValueOf(values[0])
+		v := values[0]
+		switch v.(type) {
+		case []any:
+			return v.([]any)
+		}
+
+		v = reflect.ValueOf(v)
 		if v.Kind() == reflect.Ptr {
 			if v.IsNil() {
 				return []any{}
@@ -473,6 +479,20 @@ func OSLKeyIn(b any, a any) bool {
 		return false
 	}
 
+	key := OSLcastString(b)
+	switch a := a.(type) {
+	case map[string]any:
+		_, ok := a[key]
+		return ok
+	case []any:
+		for _, v := range a {
+			if OSLcastString(v) == key {
+				return true
+			}
+		}
+		return false
+	}
+
 	v := reflect.ValueOf(a)
 	if v.Kind() == reflect.Ptr {
 		if v.IsNil() {
@@ -480,8 +500,6 @@ func OSLKeyIn(b any, a any) bool {
 		}
 		v = v.Elem()
 	}
-
-	key := OSLcastString(b)
 
 	switch v.Kind() {
 	case reflect.Map:
@@ -610,3 +628,107 @@ func OSLsetItem(a any, b any, value any) bool {
 
 	return false
 }
+
+func OSLarrayJoin(a any, b any) string {
+	var out string
+	sep := OSLcastString(b)
+	arr := OSLcastArray(a)
+
+	for _, v := range arr {
+		out += OSLcastString(v) + sep
+	}
+
+	return strings.TrimSuffix(out, sep)
+}
+
+func OSLgetKeys(a any) []any {
+	switch a := a.(type) {
+	case map[string]any:
+		keys := make([]any, len(a))
+		i := 0
+		for k := range a {
+			keys[i] = k
+			i++
+		}
+		return keys
+	case []any:
+		keys := make([]any, len(a))
+		i := 0
+		for _, v := range a {
+			keys[i] = OSLcastString(v)
+			i++
+		}
+		return keys
+	default:
+		return []any{}
+	}
+}
+
+func OSLgetValues(a any) []any {
+	switch a := a.(type) {
+	case map[string]any:
+		values := make([]any, len(a))
+		i := 0
+		for _, v := range a {
+			values[i] = v
+			i++
+		}
+		return values
+	case []any:
+		values := make([]any, len(a))
+		i := 0
+		for _, v := range a {
+			values[i] = v
+			i++
+		}
+		return values
+	default:
+		return []any{}
+	}
+}
+
+func OSLcontains(a any, b any) bool {
+	switch a := a.(type) {
+	case map[string]any:
+		_, ok := a[OSLcastString(b)]
+		return ok
+	case []any:
+		for _, v := range a {
+			if OSLcastString(v) == OSLcastString(b) {
+				return true
+			}
+		}
+		return false
+	default:
+		return false
+	}
+}
+
+func OSLappend(a *[]any, b any) []any {
+	*a = append(*a, b)
+	return *a
+}
+
+func OSLpop(a *[]any) any {
+	if len(*a) == 0 {
+		return nil
+	}
+	last := (*a)[len(*a)-1]
+	*a = (*a)[:len(*a)-1]
+	return last
+}
+
+func OSLshift(a *[]any) any {
+	if len(*a) == 0 {
+		return nil
+	}
+	first := (*a)[0]
+	*a = append([]any{}, (*a)[1:]...)
+	return first
+}
+
+func OSLprepend(a *[]any, b any) []any {
+	*a = append([]any{b}, *a...)
+	return *a
+}
+

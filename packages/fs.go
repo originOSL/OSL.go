@@ -56,12 +56,65 @@ func (FS) MkdirAll(path any) bool {
 	return err == nil
 }
 
-func (FS) ReadDir(path any) []string {
+func (FS) CopyDir(srcPath any, dstPath any) bool {
+	src := OSLcastString(srcPath)
+	dst := OSLcastString(dstPath)
+
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return false
+	}
+
+	if err := os.MkdirAll(dst, 0755); err != nil {
+		return false
+	}
+
+	for _, entry := range entries {
+		srcFile := filepath.Join(src, entry.Name())
+		dstFile := filepath.Join(dst, entry.Name())
+
+		if entry.IsDir() {
+			ok := (FS{}).CopyDir(srcFile, dstFile)
+			if !ok {
+				return false
+			}
+			continue
+		}
+
+		in, err := os.Open(srcFile)
+		if err != nil {
+			return false
+		}
+
+		out, err := os.Create(dstFile)
+		if err != nil {
+			in.Close()
+			return false
+		}
+
+		if _, err := io.Copy(out, in); err != nil {
+			in.Close()
+			out.Close()
+			return false
+		}
+
+		in.Close()
+		out.Close()
+
+		if info, err := os.Stat(srcFile); err == nil {
+			_ = os.Chmod(dstFile, info.Mode())
+		}
+	}
+
+	return true
+}
+
+func (FS) ReadDir(path any) []any {
 	files, err := os.ReadDir(OSLcastString(path))
 	if err != nil {
-		return []string{}
+		return []any{}
 	}
-	names := make([]string, len(files))
+	names := make([]any, len(files))
 	for i, f := range files {
 		names[i] = f.Name()
 	}
@@ -165,25 +218,25 @@ func (FS) GetExt(path any) string {
 	return filepath.Ext(OSLcastString(path))
 }
 
-func (FS) GetParts(path any) []string {
+func (FS) GetParts(path any) []any {
 	stringPath := OSLcastString(path)
-	return []string{filepath.Base(stringPath), filepath.Dir(stringPath), filepath.Ext(stringPath)}
+	return []any{filepath.Base(stringPath), filepath.Dir(stringPath), filepath.Ext(stringPath)}
 }
 
-func (FS) GetSize(path any) int64 {
+func (FS) GetSize(path any) float64 {
 	info, err := os.Stat(OSLcastString(path))
 	if err != nil {
 		return 0
 	}
-	return info.Size()
+	return float64(info.Size())
 }
 
-func (FS) GetModTime(path any) int64 {
+func (FS) GetModTime(path any) float64 {
 	info, err := os.Stat(OSLcastString(path))
 	if err != nil {
-		return 0
+		return 0.0
 	}
-	return info.ModTime().UnixMilli()
+	return float64(info.ModTime().UnixMilli())
 }
 
 func (FS) GetStat(path any) map[string]any {

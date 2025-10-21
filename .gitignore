@@ -36,3 +36,4 @@ osl
 *.json
 *.js
 build/
+.DS_Store

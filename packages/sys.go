@@ -5,8 +5,13 @@
 
 type OS struct{}
 
-func (OS) GetArgs() []string {
-	return os.Args
+func (OS) GetArgs() []any {
+	args := os.Args
+	out := make([]any, len(args))
+	for i, arg := range args {
+		out[i] = arg
+	}
+	return out
 }
 
 func (OS) GetEnv(key string) string {

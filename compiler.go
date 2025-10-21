@@ -734,13 +734,21 @@ func CompileToken(token *Token, ctx VariableContext) string {
 					out = fmt.Sprintf("OSLcastArray(%v)", out)
 				case "toObject":
 					out = fmt.Sprintf("OSLcastObject(%v)", out)
+				case "pop":
+					out = fmt.Sprintf("OSLpop(&(%v))", out)
+				case "shift":
+					out = fmt.Sprintf("OSLshift(&(%v))", out)
 				case "to":
 					if len(params) > 1 {
 						out = fmt.Sprintf("OSLto(%v, %v)", out, params[0])
 					}
 				case "append":
 					if len(params) > 0 {
-						out = fmt.Sprintf("append(%v, %v)", out, params[0])
+						out = fmt.Sprintf("OSLappend(&(%v), %v)", out, params[0])
+					}
+				case "prepend":
+					if len(params) > 0 {
+						out = fmt.Sprintf("OSLprepend(&(%v), %v)", out, params[0])
 					}
 				case "in":
 					if len(params) > 0 {
@@ -756,6 +764,10 @@ func CompileToken(token *Token, ctx VariableContext) string {
 					out = fmt.Sprintf("strings.ToLower(%v)", out)
 				case "toUpper":
 					out = fmt.Sprintf("strings.ToUpper(%v)", out)
+				case "getKeys":
+					out = fmt.Sprintf("OSLgetKeys(%v)", out)
+				case "getValues":
+					out = fmt.Sprintf("OSLgetValues(%v)", out)
 				case "startsWith":
 					if len(params) > 0 {
 						out = fmt.Sprintf("strings.HasPrefix(%v, %v)", out, params[0])
@@ -766,7 +778,7 @@ func CompileToken(token *Token, ctx VariableContext) string {
 					}
 				case "contains":
 					if len(params) > 0 {
-						out = fmt.Sprintf("strings.Contains(%v, %v)", out, params[0])
+						out = fmt.Sprintf("OSLcontains(%v, %v)", out, params[0])
 					}
 				case "index":
 					if len(params) > 0 {
@@ -788,7 +800,7 @@ func CompileToken(token *Token, ctx VariableContext) string {
 					}
 				case "join":
 					if len(params) > 0 {
-						out = fmt.Sprintf("strings.Join(%v, %v)", out, params[0])
+						out = fmt.Sprintf("OSLarrayJoin(%v, %v)", out, params[0])
 					}
 				case "split":
 					if len(params) > 0 {
