@@ -83,27 +83,31 @@ func OSLcastObject(s any) map[string]any {
 func OSLcastArray(values ...any) []any {
 	if len(values) == 1 {
 		v := values[0]
-		switch v.(type) {
-		case []any:
-			return v.([]any)
+
+		if arr, ok := v.([]any); ok {
+			return arr
 		}
 
-		v = reflect.ValueOf(v)
-		if v.Kind() == reflect.Ptr {
-			if v.IsNil() {
+		rv := reflect.ValueOf(v)
+
+		if rv.Kind() == reflect.Ptr {
+			if rv.IsNil() {
 				return []any{}
 			}
-			v = v.Elem()
+			rv = rv.Elem()
 		}
-		if v.Kind() == reflect.Slice || v.Kind() == reflect.Array {
-			out := make([]any, v.Len())
-			for i := 0; i < v.Len(); i++ {
-				out[i] = v.Index(i).Interface()
+
+		if rv.Kind() == reflect.Slice || rv.Kind() == reflect.Array {
+			out := make([]any, rv.Len())
+			for i := 0; i < rv.Len(); i++ {
+				out[i] = rv.Index(i).Interface()
 			}
 			return out
 		}
-		return []any{values[0]}
+
+		return []any{v}
 	}
+
 	return values
 }
 
