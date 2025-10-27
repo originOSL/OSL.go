@@ -599,7 +599,17 @@ func OSLsetItem(a any, b any, value any) bool {
 	switch v.Kind() {
 	case reflect.Map:
 		mk := reflect.ValueOf(key)
-		mv := reflect.ValueOf(value)
+		if !mk.IsValid() {
+			return false
+		}
+
+		var mv reflect.Value
+		if value == nil {
+			mv = reflect.Zero(v.Type().Elem())
+		} else {
+			mv = reflect.ValueOf(value)
+		}
+
 		if mk.Type().AssignableTo(v.Type().Key()) && mv.Type().AssignableTo(v.Type().Elem()) {
 			v.SetMapIndex(mk, mv)
 			return true
