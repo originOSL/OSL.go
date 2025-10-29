@@ -128,25 +128,6 @@ func OSLnotEqual(a any, b any) bool {
 	return !strings.EqualFold(OSLcastString(a), OSLcastString(b))
 }
 
-func OSLdelete(a any, b any) any {
-	switch a := a.(type) {
-	case map[string]any:
-		delete(a, OSLcastString(b))
-		return a
-	case []any:
-		for i, v := range a {
-			if v == b {
-				a = append(a[:i], a[i+1:]...)
-				return a
-			}
-		}
-	case string:
-		return strings.ReplaceAll(a, OSLcastString(b), "")
-	default:
-		panic("OSLdelete: unsupported type, " + reflect.TypeOf(a).String())
-	}
-}
-
 func OSLcastInt(i any) int {
 	if i == nil {
 		return 0
@@ -573,6 +554,18 @@ func OSLKeyIn(b any, a any) bool {
 func OSLdelete(a any, b any) any {
 	if a == nil {
 		return nil
+	}
+
+	switch a := a.(type) {
+	case map[string]any:
+		delete(a, OSLcastString(b))
+		return a
+	case []any:
+		idx := OSLcastInt(b) - 1
+		if idx < 0 || idx >= len(a) {
+			return a
+		}
+		return append(a[:idx], a[idx+1:]...)
 	}
 
 	v := reflect.ValueOf(a)
