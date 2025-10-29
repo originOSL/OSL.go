@@ -788,14 +788,6 @@ func CompileToken(token *Token, ctx VariableContext) string {
 					out = fmt.Sprintf("strings.TrimSpace(%v)", out)
 				case "clone":
 					out = fmt.Sprintf("OSLclone(%v)", out)
-				case "writeContentLocked":
-					if len(params) > 1 {
-						contentParam := params[1]
-						if strings.Contains(contentParam, "OSLgetItem(") && !strings.Contains(contentParam, "OSLcastString(") {
-							contentParam = fmt.Sprintf("OSLcastString(%v)", contentParam)
-						}
-						out = fmt.Sprintf("writeContentLocked(%v, %v)", params[0], contentParam)
-					}
 				case "join":
 					if len(params) > 0 {
 						out = fmt.Sprintf("OSLarrayJoin(%v, %v)", out, params[0])
@@ -803,6 +795,10 @@ func CompileToken(token *Token, ctx VariableContext) string {
 				case "split":
 					if len(params) > 0 {
 						out = fmt.Sprintf("strings.Split(%v, %v)", out, params[0])
+					}
+				case "delete":
+					if len(params) > 0 {
+						out = fmt.Sprintf("OSLdelete(%v, %v)", out, params[0])
 					}
 				case "slice":
 					if len(params) > 1 {
@@ -846,20 +842,6 @@ func CompileToken(token *Token, ctx VariableContext) string {
 						goType := mapOSLTypeToGo(paramStr)
 						out = fmt.Sprintf("%v.(%v)", out, goType)
 					}
-				case "WithContext":
-					if strings.Contains(out, "OSLgetItem(") && strings.Contains(out, "\"Request\"") {
-						out = strings.Replace(out, "OSLgetItem(", "", 1)
-						out = strings.Replace(out, ", \"Request\")", ".Request", 1)
-					}
-					if len(params) > 0 {
-						out = fmt.Sprintf("%v.WithContext(%v)", out, params[0])
-					}
-				case "Context":
-					if strings.Contains(out, "OSLgetItem(") && strings.Contains(out, "\"Request\"") {
-						out = strings.Replace(out, "OSLgetItem(", "", 1)
-						out = strings.Replace(out, ", \"Request\")", ".Request", 1)
-					}
-					out = fmt.Sprintf("%v.Context()", out)
 				case "item":
 					if len(params) > 0 {
 						out = fmt.Sprintf("OSLgetItem(%v, %v)", out, params[0])
