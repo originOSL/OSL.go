@@ -36,16 +36,18 @@ func (FS) Exists(path any) bool {
 	return err == nil
 }
 
-func (FS) Remove(path any) bool {
-	pathStr := OSLcastString(path)
-	if pathStr == "" {
-		return false
-	}
-	if !FS.Exists(pathStr) {
+func Remove(path any) bool {
+	pathStr, ok := path.(string)
+	if !ok || pathStr == "" {
 		return false
 	}
 
-	if FS.IsDir(pathStr) {
+	info, err := os.Stat(pathStr)
+	if err != nil {
+		return false
+	}
+
+	if info.IsDir() {
 		return os.RemoveAll(pathStr) == nil
 	}
 
