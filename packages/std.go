@@ -72,11 +72,14 @@ func OSLcastString(s any) string {
 }
 
 func OSLcastObject(s any) map[string]any {
+	if s == nil {
+		return map[string]any{}
+	}
 	switch s := s.(type) {
 	case map[string]any:
 		return s
 	default:
-		panic("OSLcastObject: invalid type")
+		panic("OSLcastObject: invalid type, " + reflect.TypeOf(s).String())
 	}
 }
 
@@ -159,6 +162,9 @@ func OSLcastInt(i any) int {
 }
 
 func OSLcastNumber(n any) float64 {
+	if n == nil {
+		return 0
+	}
 	switch n := n.(type) {
 	case string:
 		f, _ := strconv.ParseFloat(string(n), 64)

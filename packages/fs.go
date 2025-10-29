@@ -37,13 +37,19 @@ func (FS) Exists(path any) bool {
 }
 
 func (FS) Remove(path any) bool {
-	err := os.Remove(OSLcastString(path))
-	return err == nil
-}
+	pathStr := OSLcastString(path)
+	if pathStr == "" {
+		return false
+	}
+	if !FS.Exists(pathStr) {
+		return false
+	}
 
-func (FS) RemoveAll(path any) bool {
-	err := os.RemoveAll(OSLcastString(path))
-	return err == nil
+	if FS.IsDir(pathStr) {
+		return os.RemoveAll(pathStr) == nil
+	}
+
+	return os.Remove(pathStr) == nil
 }
 
 func (FS) Mkdir(path any) bool {
