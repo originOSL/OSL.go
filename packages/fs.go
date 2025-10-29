@@ -36,7 +36,7 @@ func (FS) Exists(path any) bool {
 	return err == nil
 }
 
-func Remove(path any) bool {
+func (FS) Remove(path any) bool {
 	pathStr, ok := path.(string)
 	if !ok || pathStr == "" {
 		return false
