@@ -768,6 +768,12 @@ func CompileToken(token *Token, ctx VariableContext) string {
 					out = fmt.Sprintf("OSLgetKeys(%v)", out)
 				case "getValues":
 					out = fmt.Sprintf("OSLgetValues(%v)", out)
+				case "floor":
+					out = fmt.Sprintf("math.Floor(%v)", out)
+				case "ceil":
+					out = fmt.Sprintf("math.Ceil(%v)", out)
+				case "round":
+					out = fmt.Sprintf("math.Round(%v)", out)
 				case "startsWith":
 					if len(params) > 0 {
 						out = fmt.Sprintf("strings.HasPrefix(%v, %v)", out, params[0])
