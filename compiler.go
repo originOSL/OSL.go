@@ -647,6 +647,14 @@ func CompileToken(token *Token, ctx VariableContext) string {
 			if len(token.Parameters) > 0 {
 				return fmt.Sprintf("OSLround(%v)", CompileToken(token.Parameters[0], ctx))
 			}
+		case "ceil":
+			if len(token.Parameters) > 0 {
+				return fmt.Sprintf("OSLceil(%v)", CompileToken(token.Parameters[0], ctx))
+			}
+		case "floor":
+			if len(token.Parameters) > 0 {
+				return fmt.Sprintf("OSLfloor(%v)", CompileToken(token.Parameters[0], ctx))
+			}
 		case "raw":
 			if len(token.Parameters) > 0 {
 				return fmt.Sprintf("%v", token.Parameters[0].Data)
@@ -771,11 +779,11 @@ func CompileToken(token *Token, ctx VariableContext) string {
 				case "getValues":
 					out = fmt.Sprintf("OSLgetValues(%v)", out)
 				case "floor":
-					out = fmt.Sprintf("math.Floor(%v)", out)
+					out = fmt.Sprintf("OSLfloor(%v)", out)
 				case "ceil":
-					out = fmt.Sprintf("math.Ceil(%v)", out)
+					out = fmt.Sprintf("OSLceil(%v)", out)
 				case "round":
-					out = fmt.Sprintf("math.Round(%v)", out)
+					out = fmt.Sprintf("OSLround(%v)", out)
 				case "startsWith":
 					if len(params) > 0 {
 						out = fmt.Sprintf("strings.HasPrefix(%v, %v)", out, params[0])

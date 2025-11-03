@@ -397,6 +397,28 @@ func OSLround(n any) int {
 	}
 }
 
+func OSLceil(n any) float64 {
+	switch n := n.(type) {
+	case int:
+		return float64(n)
+	case float64:
+		return math.Ceil(n)
+	default:
+		panic("OSLceil, invalid type: " + reflect.TypeOf(n).String())
+	}
+}
+
+func OSLfloor(n any) float64 {
+	switch n := n.(type) {
+	case int:
+		return float64(n)
+	case float64:
+		return math.Floor(n)
+	default:
+		panic("OSLfloor, invalid type: " + reflect.TypeOf(n).String())
+	}
+}
+
 func OSLtrim(s any, from int, to int) string {
 	str := []rune(OSLcastString(s))
 
