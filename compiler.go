@@ -153,6 +153,7 @@ func Compile(ast [][]*Token) string {
 			"reflect":       true,
 			"io":            true,
 			"time":          true,
+			"math":          true,
 		},
 		ImportOrder: []string{
 			"fmt",
@@ -166,6 +167,7 @@ func Compile(ast [][]*Token) string {
 			"reflect",
 			"io",
 			"time",
+			"math",
 		},
 		DeclaredVars:  make(map[string]bool),
 		VariableTypes: make(map[string]string),
