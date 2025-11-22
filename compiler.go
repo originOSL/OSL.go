@@ -9,6 +9,7 @@ import (
 	"os"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -382,7 +383,8 @@ func CompileToken(token *Token, ctx VariableContext) string {
 						compiledRight = fmt.Sprintf("OSLcastString(%v)", compiledRight)
 					}
 				case "int":
-					if !strings.HasPrefix(compiledRight, "OSLcastInt(") {
+					_, err := strconv.ParseInt(compiledRight, 10, 64)
+					if err != nil && !strings.HasPrefix(compiledRight, "OSLcastInt(") {
 						compiledRight = fmt.Sprintf("OSLcastInt(%v)", compiledRight)
 					}
 				case "number":
