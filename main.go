@@ -23,16 +23,16 @@ Usage:
   osl <command> [options]
 
 Commands:
-  setup                 Setup OSL.go environment
-  compile <file.osl>    Compile OSL file
-  transpile <file.osl>  Transpile OSL file to Go and print to stdout
-  run <file.osl>        Compile and run OSL file
-  ast <file.osl>        Generate AST for OSL file
-  uninstall             Uninstall OSL.go
-  origin                Open Origin website (https://origin.mistium.com)
-  help                  Show this help message
-  version               Show version information
-  cloc <dir> <type?>    Count lines of code in directory
+  setup                  Setup OSL.go environment
+  compile <file.osl>     Compile OSL file
+  compile-max <file.osl> Compile OSL file with maximum optimizations
+  transpile <file.osl>   Transpile OSL file to Go and print to stdout
+  run <file.osl>         Compile and run OSL file
+  ast <file.osl>         Generate AST for OSL file
+  uninstall              Uninstall OSL.go
+  origin                 Open Origin website (https://origin.mistium.com)
+  help                   Show this help message
+  version                Show version information
 
 For more information, visit: https://origin.mistium.com`
 )
@@ -164,13 +164,13 @@ func transpile(args []string) {
 	fmt.Println(scriptToGo(script))
 }
 
-func compile(args []string) {
-	if len(args) != 1 {
+func compile(main_args []string, max bool) {
+	if len(main_args) != 1 {
 		fmt.Println("Usage: osl compile <file.osl>")
 		return
 	}
 
-	inputFile := args[0]
+	inputFile := main_args[0]
 
 	scriptDir := filepath.Dir(inputFile)
 	originalDir, err := os.Getwd()
@@ -218,7 +218,13 @@ func compile(args []string) {
 	outputName := strings.TrimSuffix(filepath.Base(inputFile), ".osl")
 	outputPath := filepath.Join(cwd, outputName)
 
-	buildCmd := exec.Command("go", "build", "-o", outputPath, tmpGoFile)
+	args := []string{}
+	if max {
+		args = append(args, "-ldflags", "-s -w")
+	}
+	args = append(args, "-o", outputPath, tmpGoFile)
+
+	buildCmd := exec.Command("go", append([]string{"build"}, args...)...)
 	buildCmd.Dir = tmpDir
 	output, err := buildCmd.CombinedOutput()
 	if err != nil {
@@ -322,59 +328,6 @@ func run(args []string) {
 	}
 }
 
-func cloc(args []string) {
-	if len(args) < 1 {
-		fmt.Println("Usage: osl cloc <dir> <filetype?>")
-		fmt.Println("Example: osl cloc . osl")
-		return
-	}
-
-	dir := args[0]
-	fileType := "osl"
-	if len(args) > 1 {
-		fileType = args[1]
-	}
-
-	total := 0
-
-	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			fmt.Println("Error reading:", path, err)
-			return nil // keep walking
-		}
-
-		if d.IsDir() {
-			return nil
-		}
-
-		if !strings.HasSuffix(d.Name(), "."+fileType) {
-			return nil
-		}
-
-		script := openFile(path)
-		if script == "" {
-			return nil
-		}
-
-		lines := strings.Split(script, "\n")
-		count := 0
-		for _, line := range lines {
-			if strings.TrimSpace(line) != "" {
-				count++
-			}
-		}
-		total += count
-		return nil
-	})
-
-	if err != nil {
-		fmt.Println("Failed to walk directory:", err)
-		return
-	}
-
-	fmt.Println("Total lines of code:", total)
-}
-
 func main() {
 	args := os.Args
 	if len(args) < 2 {
@@ -387,7 +340,9 @@ func main() {
 	case "setup":
 		setup()
 	case "compile":
-		compile(args[2:])
+		compile(args[2:], false)
+	case "compile-max":
+		compile(args[2:], true)
 	case "transpile":
 		transpile(args[2:])
 	case "ast":
@@ -403,8 +358,6 @@ func main() {
 		fmt.Println(fmt.Sprintf(response, OSL_VERSION))
 	case "version":
 		fmt.Println(OSL_VERSION)
-	case "cloc":
-		cloc(args[2:])
 	default:
 		fmt.Println("Usage: osl <script> -o <output> -a (true/false generate ast)")
 		return
