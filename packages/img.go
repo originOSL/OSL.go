@@ -18,21 +18,16 @@ func OSL_img_store(im OSL_image.Image) string {
 	return id
 }
 
-func OSL_img_get(id any) OSL_image.Image {
-	s, ok := id.(string)
-	if !ok {
-		return nil
-	}
-
+func OSL_img_get(id string) OSL_image.Image {
 	imgMu.Lock()
-	im := imgStore[s]
+	im := imgStore[id]
 	imgMu.Unlock()
 
 	return im
 }
 
-func (IMG) DecodeBytes(data any) any {
-	b, ok := data.([]byte)
+func (IMG) DecodeBytes(data []byte) string {
+	b, ok := data
 	if !ok {
 		return ""
 	}
@@ -45,7 +40,7 @@ func (IMG) DecodeBytes(data any) any {
 	return OSL_img_store(im)
 }
 
-func (IMG) DecodeFile(path any) any {
+func (IMG) DecodeFile(path any) string {
 	b, err := os.ReadFile(OSLcastString(path))
 	if err != nil {
 		return ""
@@ -54,7 +49,7 @@ func (IMG) DecodeFile(path any) any {
 }
 
 func (IMG) EncodePNG(id any) []byte {
-	im := OSL_img_get(id)
+	im := OSL_img_get(OSLcastString(id))
 	if im == nil {
 		return []byte{}
 	}
@@ -71,9 +66,7 @@ func (IMG) EncodeJPEG(id any, quality any) []byte {
 	}
 
 	q := 80
-	if v, ok := quality.(float64); ok {
-		q = int(v)
-	}
+	v := OSLcastNumber(quality)
 
 	var buf OSL_bytes.Buffer
 	_ = jpeg.Encode(&buf, im, &jpeg.Options{Quality: q})
@@ -81,7 +74,7 @@ func (IMG) EncodeJPEG(id any, quality any) []byte {
 }
 
 func (IMG) Size(id any) map[string]any {
-	im := OSL_img_get(id)
+	im := OSL_img_get(OSLcastString(id))
 	if im == nil {
 		return map[string]any{"w": 0, "h": 0}
 	}
@@ -94,7 +87,7 @@ func (IMG) Size(id any) map[string]any {
 }
 
 func (IMG) Bounds(id any) map[string]any {
-	im := OSL_img_get(id)
+	im := OSL_img_get(OSLcastString(id))
 	if im == nil {
 		return map[string]any{}
 	}
@@ -109,12 +102,12 @@ func (IMG) Bounds(id any) map[string]any {
 }
 
 func (IMG) SavePNG(id any, path any) bool {
-	data := img.EncodePNG(id)
+	data := img.EncodePNG(OSLcastString(id))
 	return os.WriteFile(OSLcastString(path), data, 0644) == nil
 }
 
 func (IMG) SaveJPEG(id any, path any, quality any) bool {
-	data := img.EncodeJPEG(id, quality)
+	data := img.EncodeJPEG(OSLcastString(id), OSLcastNumber(quality))
 	return os.WriteFile(OSLcastString(path), data, 0644) == nil
 }
 
