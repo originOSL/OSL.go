@@ -31,12 +31,7 @@ func (IMG) GetImage(id string) OSL_image.Image {
 }
 
 func (IMG) DecodeBytes(data []byte) string {
-	b, ok := data
-	if !ok {
-		return ""
-	}
-
-	im, _, err := OSL_image.Decode(OSL_bytes.NewReader(b))
+	im, _, err := OSL_image.Decode(OSL_bytes.NewReader(data))
 	if err != nil {
 		return ""
 	}
@@ -64,16 +59,15 @@ func (IMG) EncodePNG(id any) []byte {
 }
 
 func (IMG) EncodeJPEG(id any, quality any) []byte {
-	im := OSL_img_get(id)
+	im := OSL_img_get(OSLcastString(id))
 	if im == nil {
 		return []byte{}
 	}
 
-	q := 80
 	v := OSLcastNumber(quality)
 
 	var buf OSL_bytes.Buffer
-	_ = jpeg.Encode(&buf, im, &jpeg.Options{Quality: q})
+	_ = jpeg.Encode(&buf, im, &jpeg.Options{Quality: v})
 	return buf.Bytes()
 }
 
