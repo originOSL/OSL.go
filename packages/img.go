@@ -26,6 +26,10 @@ func OSL_img_get(id string) OSL_image.Image {
 	return im
 }
 
+func (IMG) GetImage(id string) OSL_image.Image {
+	return OSL_img_get(id)
+}
+
 func (IMG) DecodeBytes(data []byte) string {
 	b, ok := data
 	if !ok {
