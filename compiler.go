@@ -212,7 +212,8 @@ func Compile(ast [][]*Token) string {
 		prepend += ")\n\n"
 	}
 
-	prepend += "var wincreatetime float64 = OSLcastNumber(time.Now().UnixMilli())\n\n"
+	prepend += "var wincreatetime float64 = OSLcastNumber(time.Now().UnixMilli())\n"
+	prepend += "var system_os = runtime.GOOS\n\n"
 	prepend += include("packages/std.go")
 
 	return prepend + importsCompiled + mainCompiled
@@ -538,8 +539,6 @@ func CompileToken(token *Token, ctx VariableContext) string {
 			return "OSLcastNumber(time.Now().UnixMilli())"
 		case "performance":
 			return "OSLcastNumber(time.Now().UnixMicro())"
-		case "system_os":
-			return "runtime.GOOS"
 		}
 		return varName
 	case TKN_RAW:
