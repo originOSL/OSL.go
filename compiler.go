@@ -155,6 +155,7 @@ func Compile(ast [][]*Token) string {
 			"io":            true,
 			"time":          true,
 			"math":          true,
+			"runtime":       true,
 		},
 		ImportOrder: []string{
 			"fmt",
@@ -169,6 +170,7 @@ func Compile(ast [][]*Token) string {
 			"io",
 			"time",
 			"math",
+			"runtime",
 		},
 		DeclaredVars:  make(map[string]bool),
 		VariableTypes: make(map[string]string),
@@ -536,6 +538,8 @@ func CompileToken(token *Token, ctx VariableContext) string {
 			return "OSLcastNumber(time.Now().UnixMilli())"
 		case "performance":
 			return "OSLcastNumber(time.Now().UnixMicro())"
+		case "system_os":
+			return "runtime.GOOS"
 		}
 		return varName
 	case TKN_RAW:

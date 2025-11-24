@@ -265,5 +265,14 @@ func (FS) GetStat(path any) map[string]any {
 	}
 }
 
+func (FS) EvalSymlinks(path any) string {
+	pathStr := OSLcastString(path)
+	absPath, err := filepath.EvalSymlinks(pathStr)
+	if err != nil {
+		return ""
+	}
+	return absPath
+}
+
 // Global instance
 var fs = FS{}

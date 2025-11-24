@@ -1,7 +1,7 @@
 // name: sys
 // description: OS utilities
 // author: Mist
-// requires: os/user, os, os/exec
+// requires: os/user, os, os/exec, runtime
 
 type OS struct{}
 
@@ -87,6 +87,14 @@ func (OS) CMD(cmd string, args ...string) string {
 		return ""
 	}
 	return string(out)
+}
+
+func (OS) GetExecutablePath() string {
+	path, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	return path
 }
 
 var sys = OS{}
