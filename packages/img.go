@@ -30,6 +30,10 @@ func (IMG) GetImage(id string) OSL_image.Image {
 	return OSL_img_get(id)
 }
 
+func (IMG) UseImage(imgage OSL_image.Image) string {
+	return OSL_img_store(imgage)
+}
+
 func (IMG) DecodeBytes(data []byte) string {
 	im, _, err := OSL_image.Decode(OSL_bytes.NewReader(data))
 	if err != nil {
