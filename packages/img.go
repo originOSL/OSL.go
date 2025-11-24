@@ -114,7 +114,7 @@ func (IMG) SaveJPEG(id any, path any, quality any) bool {
 }
 
 func (IMG) Resize(id any, width any, height any) string {
-	im := getImage(id)
+	im := OSL_img_get(OSLcastString(id))
 	if im == nil {
 		return ""
 	}
