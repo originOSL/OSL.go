@@ -126,7 +126,7 @@ func (IMG) Resize(id any, width any, height any) string {
 		return ""
 	}
 
-	dst := image.NewRGBA(image.Rect(0, 0, w, h))
+	dst := OSL_image.NewRGBA(image.Rect(0, 0, w, h))
 
 	draw.CatmullRom.Scale(dst, dst.Bounds(), im, im.Bounds(), draw.Over, nil)
 
