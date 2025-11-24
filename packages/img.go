@@ -1,7 +1,7 @@
 // name: img
 // description: Dynamic image utilities for OSL
 // author: Mist
-// requires: bytes as OSL_bytes, golang.org/x/image/draw as OSL_draw, image as OSL_image, image/png, image/jpeg
+// requires: bytes as OSL_bytes, golang.org/x/image/draw as OSL_draw, image as OSL_image, image/png, image/jpeg, sync
 
 type IMG struct{}
 
@@ -20,7 +20,7 @@ func OSL_img_store(im OSL_image.Image) string {
 
 func OSL_img_get(id string) OSL_image.Image {
 	OSL_img_Mu.Lock()
-	im := imgStore[id]
+	im := OSL_img_Store[id]
 	OSL_img_Mu.Unlock()
 
 	return im
@@ -68,7 +68,7 @@ func (IMG) EncodeJPEG(id any, quality any) []byte {
 		return []byte{}
 	}
 
-	v := OSLcastNumber(quality)
+	v := int(OSLcastNumber(quality))
 
 	var buf OSL_bytes.Buffer
 	_ = jpeg.Encode(&buf, im, &jpeg.Options{Quality: v})
@@ -119,8 +119,8 @@ func (IMG) Resize(id any, width any, height any) string {
 		return ""
 	}
 
-	w := OSLcastNumber(width)
-	h := OSLcastNumber(height)
+	w := int(OSLcastNumber(width))
+	h := int(OSLcastNumber(height))
 
 	if w <= 0 || h <= 0 {
 		return ""
@@ -130,7 +130,7 @@ func (IMG) Resize(id any, width any, height any) string {
 
 	OSL_draw.CatmullRom.Scale(dst, dst.Bounds(), im, im.Bounds(), draw.Over, nil)
 
-	return storeImage(dst)
+	return OSL_img_store(dst)
 }
 
 var img = IMG{}
