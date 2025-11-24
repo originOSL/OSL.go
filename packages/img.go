@@ -1,27 +1,27 @@
 // name: img
 // description: Dynamic image utilities for OSL
 // author: Mist
-// requires: bytes as OSL_bytes, image as OSL_image, image/png, image/jpeg, sync, time, os, fmt
+// requires: bytes as OSL_bytes, golang.org/x/image/draw as OSL_draw, image as OSL_image, image/png, image/jpeg
 
 type IMG struct{}
 
 var (
-	imgStore = map[string]OSL_image.Image{}
-	imgMu    sync.Mutex
+	OSL_img_Store = map[string]OSL_image.Image{}
+	OSL_img_Mu    sync.Mutex
 )
 
 func OSL_img_store(im OSL_image.Image) string {
 	id := fmt.Sprintf("img_%d", time.Now().UnixNano())
-	imgMu.Lock()
-	imgStore[id] = im
-	imgMu.Unlock()
+	OSL_img_Mu.Lock()
+	OSL_img_Store[id] = im
+	OSL_img_Mu.Unlock()
 	return id
 }
 
 func OSL_img_get(id string) OSL_image.Image {
-	imgMu.Lock()
+	OSL_img_Mu.Lock()
 	im := imgStore[id]
-	imgMu.Unlock()
+	OSL_img_Mu.Unlock()
 
 	return im
 }
@@ -111,6 +111,26 @@ func (IMG) SavePNG(id any, path any) bool {
 func (IMG) SaveJPEG(id any, path any, quality any) bool {
 	data := img.EncodeJPEG(OSLcastString(id), OSLcastNumber(quality))
 	return os.WriteFile(OSLcastString(path), data, 0644) == nil
+}
+
+func (IMG) Resize(id any, width any, height any) string {
+	im := getImage(id)
+	if im == nil {
+		return ""
+	}
+
+	w := OSLcastNumber(width)
+	h := OSLcastNumber(height)
+
+	if w <= 0 || h <= 0 {
+		return ""
+	}
+
+	dst := image.NewRGBA(image.Rect(0, 0, w, h))
+
+	draw.CatmullRom.Scale(dst, dst.Bounds(), im, im.Bounds(), draw.Over, nil)
+
+	return storeImage(dst)
 }
 
 var img = IMG{}
