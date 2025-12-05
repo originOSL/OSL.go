@@ -753,6 +753,8 @@ func OSLcontains(a any, b any) bool {
 			}
 		}
 		return false
+	case string:
+		return strings.Contains(a, OSLcastString(b))
 	default:
 		return false
 	}
