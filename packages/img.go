@@ -1,7 +1,7 @@
 // name: img
 // description: Dynamic image utilities for OSL
 // author: Mist
-// requires: bytes as OSL_bytes, golang.org/x/image/draw as OSL_draw, image as OSL_image, image/png, image/jpeg, sync
+// requires: bytes as OSL_bytes, golang.org/x/image/draw as OSL_draw, image as OSL_image, image/png, image/jpeg, sync, sync/atomic
 
 type IMG struct{}
 
