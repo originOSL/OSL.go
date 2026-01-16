@@ -7,11 +7,29 @@ type IMG struct{}
 
 var (
 	OSL_img_Store = map[string]OSL_image.Image{}
-	OSL_img_Mu    sync.Mutex
+	OSL_img_ID    uint64
+	OSL_img_Mu    sync.RWMutex
+)
+
+const (
+	OSL_img_Max    = 1024
+	OSL_img_MaxDim = 4096
 )
 
 func OSL_img_store(im OSL_image.Image) string {
-	id := fmt.Sprintf("img_%d", time.Now().UnixNano())
+	if im == nil {
+		return ""
+	}
+
+	OSL_img_Mu.RLock()
+	if len(OSL_img_Store) >= OSL_img_Max {
+		OSL_img_Mu.RUnlock()
+		return ""
+	}
+	OSL_img_Mu.RUnlock()
+
+	id := fmt.Sprintf("img_%d", atomic.AddUint64(&OSL_img_ID, 1))
+
 	OSL_img_Mu.Lock()
 	OSL_img_Store[id] = im
 	OSL_img_Mu.Unlock()
@@ -19,10 +37,13 @@ func OSL_img_store(im OSL_image.Image) string {
 }
 
 func OSL_img_get(id string) OSL_image.Image {
-	OSL_img_Mu.Lock()
-	im := OSL_img_Store[id]
-	OSL_img_Mu.Unlock()
+	if id == "" {
+		return nil
+	}
 
+	OSL_img_Mu.RLock()
+	im := OSL_img_Store[id]
+	OSL_img_Mu.RUnlock()
 	return im
 }
 
@@ -54,7 +75,7 @@ func (IMG) DecodeFile(path any) string {
 func (IMG) EncodePNG(id any) []byte {
 	im := OSL_img_get(OSLcastString(id))
 	if im == nil {
-		return []byte{}
+		return nil
 	}
 
 	var buf OSL_bytes.Buffer
@@ -65,7 +86,7 @@ func (IMG) EncodePNG(id any) []byte {
 func (IMG) EncodeJPEG(id any, quality any) []byte {
 	im := OSL_img_get(OSLcastString(id))
 	if im == nil {
-		return []byte{}
+		return nil
 	}
 
 	v := int(OSLcastNumber(quality))
@@ -78,7 +99,7 @@ func (IMG) EncodeJPEG(id any, quality any) []byte {
 func (IMG) Size(id any) map[string]any {
 	im := OSL_img_get(OSLcastString(id))
 	if im == nil {
-		return map[string]any{"w": 0, "h": 0}
+		return nil
 	}
 
 	b := im.Bounds()
@@ -91,7 +112,7 @@ func (IMG) Size(id any) map[string]any {
 func (IMG) Bounds(id any) map[string]any {
 	im := OSL_img_get(OSLcastString(id))
 	if im == nil {
-		return map[string]any{}
+		return nil
 	}
 
 	b := im.Bounds()
@@ -122,15 +143,37 @@ func (IMG) Resize(id any, width any, height any) string {
 	w := int(OSLcastNumber(width))
 	h := int(OSLcastNumber(height))
 
-	if w <= 0 || h <= 0 {
+	if w <= 0 || h <= 0 || w > OSL_img_MaxDim || h > OSL_img_MaxDim {
 		return ""
 	}
 
 	dst := OSL_image.NewRGBA(OSL_image.Rect(0, 0, w, h))
-
 	OSL_draw.CatmullRom.Scale(dst, dst.Bounds(), im, im.Bounds(), OSL_draw.Over, nil)
 
 	return OSL_img_store(dst)
+}
+
+func (IMG) Free(id any) {
+	OSL_img_Mu.Lock()
+	delete(OSL_img_Store, OSLcastString(id))
+	OSL_img_Mu.Unlock()
+}
+
+func (IMG) FreeAll() {
+	OSL_img_Mu.Lock()
+	OSL_img_Store = map[string]OSL_image.Image{}
+	OSL_img_Mu.Unlock()
+}
+
+func (IMG) Stats() map[string]any {
+	OSL_img_Mu.RLock()
+	n := len(OSL_img_Store)
+	OSL_img_Mu.RUnlock()
+
+	return map[string]any{
+		"count": n,
+		"max":   OSL_img_Max,
+	}
 }
 
 var img = IMG{}
