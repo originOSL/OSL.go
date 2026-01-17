@@ -1,58 +1,66 @@
 // name: img
-// description: Dynamic image utilities for OSL
+// description: Memory-efficient dynamic image utilities for OSL
 // author: Mist
-// requires: bytes as OSL_bytes, golang.org/x/image/draw as OSL_draw, image as OSL_image, image/png, image/jpeg, sync, sync/atomic
+// requires: bytes as OSL_bytes, image as OSL_image, image/png, image/jpeg, golang.org/x/image/draw as OSL_draw, github.com/nfnt/resize as OSL_img_resize, sync, sync/atomic, fmt, os
+
+const (
+	imgMaxDim = 4096
+)
 
 type IMG struct{}
 
+type imgEntry struct {
+	im *OSL_image.RGBA
+}
+
 var (
-	OSL_img_Store = map[string]OSL_image.Image{}
-	OSL_img_ID    uint64
+	OSL_img_Store = make(map[string]*imgEntry)
 	OSL_img_Mu    sync.RWMutex
+	OSL_img_ID    uint64
 )
 
-const (
-	OSL_img_Max    = 1024
-	OSL_img_MaxDim = 4096
-)
+func OSL_allocRGBA(w, h int) *OSL_image.RGBA {
+	return OSL_image.NewRGBA(OSL_image.Rect(0, 0, w, h))
+}
 
-func OSL_img_store(im OSL_image.Image) string {
+func OSL_toRGBA(src OSL_image.Image) *OSL_image.RGBA {
+	if src == nil {
+		return nil
+	}
+
+	if im, ok := src.(*OSL_image.RGBA); ok {
+		return im
+	}
+
+	b := src.Bounds()
+	dst := OSL_allocRGBA(b.Dx(), b.Dy())
+	OSL_draw.Draw(dst, dst.Bounds(), src, b.Min, OSL_draw.Src)
+	return dst
+}
+
+func OSL_storeImage(src OSL_image.Image) string {
+	im := OSL_toRGBA(src)
 	if im == nil {
 		return ""
 	}
 
-	OSL_img_Mu.RLock()
-	if len(OSL_img_Store) >= OSL_img_Max {
-		OSL_img_Mu.RUnlock()
-		return ""
-	}
-	OSL_img_Mu.RUnlock()
+	OSL_img_Mu.Lock()
+	defer OSL_img_Mu.Unlock()
 
 	id := fmt.Sprintf("img_%d", atomic.AddUint64(&OSL_img_ID, 1))
-
-	OSL_img_Mu.Lock()
-	OSL_img_Store[id] = im
-	OSL_img_Mu.Unlock()
+	OSL_img_Store[id] = &imgEntry{im: im}
 	return id
 }
 
-func OSL_img_get(id string) OSL_image.Image {
-	if id == "" {
+func OSL_getImage(id string) *OSL_image.RGBA {
+	OSL_img_Mu.RLock()
+	e := OSL_img_Store[id]
+	OSL_img_Mu.RUnlock()
+
+	if e == nil {
 		return nil
 	}
-
-	OSL_img_Mu.RLock()
-	im := OSL_img_Store[id]
-	OSL_img_Mu.RUnlock()
-	return im
-}
-
-func (IMG) GetImage(id string) OSL_image.Image {
-	return OSL_img_get(id)
-}
-
-func (IMG) UseImage(imgage OSL_image.Image) string {
-	return OSL_img_store(imgage)
+	return e.im
 }
 
 func (IMG) DecodeBytes(data []byte) string {
@@ -60,12 +68,11 @@ func (IMG) DecodeBytes(data []byte) string {
 	if err != nil {
 		return ""
 	}
-
-	return OSL_img_store(im)
+	return OSL_storeImage(im)
 }
 
-func (IMG) DecodeFile(path any) string {
-	b, err := os.ReadFile(OSLcastString(path))
+func (IMG) DecodeFile(path string) string {
+	b, err := os.ReadFile(path)
 	if err != nil {
 		return ""
 	}
@@ -73,7 +80,7 @@ func (IMG) DecodeFile(path any) string {
 }
 
 func (IMG) EncodePNG(id any) []byte {
-	im := OSL_img_get(OSLcastString(id))
+	im := OSL_getImage(OSLcastString(id))
 	if im == nil {
 		return nil
 	}
@@ -83,21 +90,26 @@ func (IMG) EncodePNG(id any) []byte {
 	return buf.Bytes()
 }
 
-func (IMG) EncodeJPEG(id any, quality any) []byte {
-	im := OSL_img_get(OSLcastString(id))
+func (IMG) EncodeJPEG(id any, quality int) []byte {
+	im := OSL_getImage(OSLcastString(id))
 	if im == nil {
 		return nil
 	}
 
-	v := int(OSLcastNumber(quality))
+	if quality < 1 {
+		quality = 1
+	}
+	if quality > 100 {
+		quality = 100
+	}
 
 	var buf OSL_bytes.Buffer
-	_ = jpeg.Encode(&buf, im, &jpeg.Options{Quality: v})
+	_ = jpeg.Encode(&buf, im, &jpeg.Options{Quality: quality})
 	return buf.Bytes()
 }
 
 func (IMG) Size(id any) map[string]any {
-	im := OSL_img_get(OSLcastString(id))
+	im := OSL_getImage(OSLcastString(id))
 	if im == nil {
 		return nil
 	}
@@ -110,7 +122,7 @@ func (IMG) Size(id any) map[string]any {
 }
 
 func (IMG) Bounds(id any) map[string]any {
-	im := OSL_img_get(OSLcastString(id))
+	im := OSL_getImage(OSLcastString(id))
 	if im == nil {
 		return nil
 	}
@@ -124,44 +136,185 @@ func (IMG) Bounds(id any) map[string]any {
 	}
 }
 
+func (IMG) Resize(id any, width, height int) string {
+	src := OSL_getImage(OSLcastString(id))
+	if src == nil {
+		return ""
+	}
+
+	if width <= 0 || height <= 0 || width > imgMaxDim || height > imgMaxDim {
+		return ""
+	}
+
+	m := OSL_img_resize.Resize(uint(width), uint(height), src, OSL_img_resize.Lanczos3)
+	return OSL_storeImage(m)
+}
+
+func OSL_img_rotate90(src OSL_image.Image, angle int) string {
+	sb := src.Bounds()
+	sw, sh := sb.Dx(), sb.Dy()
+
+	if angle == 0 {
+		return OSL_storeImage(src)
+	}
+
+	var dst *OSL_image.RGBA
+	if angle == 180 {
+		dst = OSL_allocRGBA(sw, sh)
+	} else {
+		dst = OSL_allocRGBA(sh, sw)
+	}
+
+	for y := 0; y < sh; y++ {
+		for x := 0; x < sw; x++ {
+			c := src.At(sb.Min.X+x, sb.Min.Y+y)
+
+			switch angle {
+			case 90:
+				dst.Set(sh-1-y, x, c)
+			case 180:
+				dst.Set(sw-1-x, sh-1-y, c)
+			case 270:
+				dst.Set(y, sw-1-x, c)
+			}
+		}
+	}
+
+	return OSL_storeImage(dst)
+}
+
+func OSL_img_rotateAny(src OSL_image.Image, angle float64) string {
+	sb := src.Bounds()
+	sw, sh := sb.Dx(), sb.Dy()
+
+	rad := angle * math.Pi / 180
+	sin, cos := math.Sin(rad), math.Cos(rad)
+
+	// compute new bounds
+	nw := int(math.Abs(float64(sw)*cos) + math.Abs(float64(sh)*sin))
+	nh := int(math.Abs(float64(sw)*sin) + math.Abs(float64(sh)*cos))
+
+	dst := OSL_allocRGBA(nw, nh)
+
+	cx := float64(sw) / 2
+	cy := float64(sh) / 2
+	ncx := float64(nw) / 2
+	ncy := float64(nh) / 2
+
+	for y := 0; y < nh; y++ {
+		for x := 0; x < nw; x++ {
+			tx := float64(x) - ncx
+			ty := float64(y) - ncy
+
+			sx := tx*cos + ty*sin + cx
+			sy := -tx*sin + ty*cos + cy
+
+			if sx < 0 || sy < 0 || sx >= float64(sw) || sy >= float64(sh) {
+				continue
+			}
+
+			dst.Set(x, y, src.At(
+				sb.Min.X+int(sx),
+				sb.Min.Y+int(sy),
+			))
+		}
+	}
+
+	return OSL_storeImage(dst)
+}
+
+func (IMG) Rotate(id any, angle any) string {
+	src := OSL_getImage(OSLcastString(id))
+	if src == nil {
+		return ""
+	}
+
+	a := OSLround(OSLcastNumber(angle)) % 360
+	if a < 0 {
+		a += 360
+	}
+
+	if a%90 == 0 {
+		return OSL_img_rotate90(src, a)
+	}
+
+	return OSL_img_rotateAny(src, float64(a))
+}
+
 func (IMG) SavePNG(id any, path any) bool {
-	data := img.EncodePNG(OSLcastString(id))
+	data := img.EncodePNG(id)
+	if data == nil {
+		return false
+	}
 	return os.WriteFile(OSLcastString(path), data, 0644) == nil
 }
 
-func (IMG) SaveJPEG(id any, path any, quality any) bool {
-	data := img.EncodeJPEG(OSLcastString(id), OSLcastNumber(quality))
+func (IMG) SaveJPEG(id any, path any, quality int) bool {
+	data := img.EncodeJPEG(id, quality)
+	if data == nil {
+		return false
+	}
 	return os.WriteFile(OSLcastString(path), data, 0644) == nil
 }
 
-func (IMG) Resize(id any, width any, height any) string {
-	im := OSL_img_get(OSLcastString(id))
+func (IMG) Crop(id any, x, y, w, h int) string {
+	src := OSL_getImage(OSLcastString(id))
+	if src == nil || w <= 0 || h <= 0 {
+		return ""
+	}
+
+	r := OSL_image.Rect(x, y, x+w, y+h).Intersect(src.Bounds())
+	if r.Empty() {
+		return ""
+	}
+
+	dst := OSL_allocRGBA(r.Dx(), r.Dy())
+	OSL_draw.Draw(dst, dst.Bounds(), src, r.Min, OSL_draw.Src)
+	return OSL_storeImage(dst)
+}
+
+func (IMG) Clone(id any) string {
+	src := OSL_getImage(OSLcastString(id))
+	if src == nil {
+		return ""
+	}
+
+	b := src.Bounds()
+	dst := OSL_allocRGBA(b.Dx(), b.Dy())
+	copy(dst.Pix, src.Pix)
+	return OSL_storeImage(dst)
+}
+
+func (IMG) Fill(id any, r, g, b, a uint8) bool {
+	im := OSL_getImage(OSLcastString(id))
 	if im == nil {
-		return ""
+		return false
 	}
 
-	w := int(OSLcastNumber(width))
-	h := int(OSLcastNumber(height))
-
-	if w <= 0 || h <= 0 || w > OSL_img_MaxDim || h > OSL_img_MaxDim {
-		return ""
+	pix := im.Pix
+	for i := 0; i < len(pix); i += 4 {
+		pix[i+0] = r
+		pix[i+1] = g
+		pix[i+2] = b
+		pix[i+3] = a
 	}
-
-	dst := OSL_image.NewRGBA(OSL_image.Rect(0, 0, w, h))
-	OSL_draw.CatmullRom.Scale(dst, dst.Bounds(), im, im.Bounds(), OSL_draw.Over, nil)
-
-	return OSL_img_store(dst)
+	return true
 }
 
 func (IMG) Free(id any) {
+	idStr := OSLcastString(id)
+	if idStr == "" {
+		return
+	}
+
 	OSL_img_Mu.Lock()
-	delete(OSL_img_Store, OSLcastString(id))
+	delete(OSL_img_Store, idStr)
 	OSL_img_Mu.Unlock()
 }
 
 func (IMG) FreeAll() {
 	OSL_img_Mu.Lock()
-	OSL_img_Store = map[string]OSL_image.Image{}
+	OSL_img_Store = make(map[string]*imgEntry)
 	OSL_img_Mu.Unlock()
 }
 
@@ -172,7 +325,6 @@ func (IMG) Stats() map[string]any {
 
 	return map[string]any{
 		"count": n,
-		"max":   OSL_img_Max,
 	}
 }
 
