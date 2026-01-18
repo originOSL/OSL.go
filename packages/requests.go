@@ -85,50 +85,50 @@ func (h *HTTP) doRequest(method, url string, data map[string]any) map[string]any
 	return out
 }
 
-func (h *HTTP) Get(url string, data ...map[string]any) map[string]any {
+func (h *HTTP) Get(url any, data ...map[string]any) map[string]any {
 	var m map[string]any
 	if len(data) > 0 {
 		m = data[0]
 	}
-	return h.doRequest(http.MethodGet, url, m)
+	return h.doRequest(http.MethodGet, OSLcastString(url), m)
 }
 
-func (h *HTTP) Post(url string, data map[string]any) map[string]any {
-	return h.doRequest(http.MethodPost, url, data)
+func (h *HTTP) Post(url any, data map[string]any) map[string]any {
+	return h.doRequest(http.MethodPost, OSLcastString(url), data)
 }
 
-func (h *HTTP) Put(url string, data map[string]any) map[string]any {
-	return h.doRequest(http.MethodPut, url, data)
+func (h *HTTP) Put(url any, data map[string]any) map[string]any {
+	return h.doRequest(http.MethodPut, OSLcastString(url), data)
 }
 
-func (h *HTTP) Patch(url string, data map[string]any) map[string]any {
-	return h.doRequest(http.MethodPatch, url, data)
+func (h *HTTP) Patch(url any, data map[string]any) map[string]any {
+	return h.doRequest(http.MethodPatch, OSLcastString(url), data)
 }
 
-func (h *HTTP) Delete(url string, data ...map[string]any) map[string]any {
+func (h *HTTP) Delete(url any, data ...map[string]any) map[string]any {
 	var m map[string]any
 	if len(data) > 0 {
 		m = data[0]
 	}
-	return h.doRequest(http.MethodDelete, url, m)
+	return h.doRequest(http.MethodDelete, OSLcastString(url), m)
 }
 
-func (h *HTTP) Options(url string, data ...map[string]any) map[string]any {
+func (h *HTTP) Options(url any, data ...map[string]any) map[string]any {
 	var m map[string]any
 	if len(data) > 0 {
 		m = data[0]
 	}
-	return h.doRequest(http.MethodOptions, url, m)
+	return h.doRequest(http.MethodOptions, OSLcastString(url), m)
 }
 
-func (h *HTTP) Head(url string, data ...map[string]any) map[string]any {
+func (h *HTTP) Head(url any, data ...map[string]any) map[string]any {
 	var m map[string]any
 	if len(data) > 0 {
 		m = data[0]
 	}
 	out := map[string]any{"success": false}
 	headers, _ := extractHeadersAndBody(m)
-	req, err := http.NewRequest(http.MethodHead, url, nil)
+	req, err := http.NewRequest(http.MethodHead, OSLcastString(url), nil)
 	if err != nil {
 		return out
 	}

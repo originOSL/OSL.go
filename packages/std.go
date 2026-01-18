@@ -49,21 +49,12 @@ func OSLcastString(s any) string {
 		return string(s)
 	case []any:
 		return JsonStringify(s)
-	case map[string]any:
-		return JsonStringify(s)
-	case map[string]string:
-		return JsonStringify(s)
-	case map[string]int:
-		return JsonStringify(s)
-	case map[string]float64:
-		return JsonStringify(s)
-	case map[string]bool:
+	case map[string]any, map[string]string, map[string]int, map[string]float64, map[string]bool:
 		return JsonStringify(s)
 	case io.Reader:
 		data, err := io.ReadAll(s)
 		if err != nil {
 			panic("OSLcastString: failed to read io.Reader:" + err.Error())
-			return ""
 		}
 		return string(data)
 	default:
@@ -236,10 +227,20 @@ func OSLcastUsable(s any) any {
 	}
 }
 
-func OSLrandom(low any, high any) int {
-	highInt := OSLcastInt(high)
-	lowInt := OSLcastInt(low)
-	return OSLcastInt(rand.Intn(int(highInt-lowInt+1))) + lowInt
+func OSLrandom[T int | float64](low, high T) T {
+	if high <= low {
+		return low
+	}
+
+	switch any(low).(type) {
+	case int:
+		return T(rand.Intn(int(high-low)) + int(low))
+
+	case float64:
+		return (T(rand.Float64()) * (high - low)) + low
+	}
+
+	panic("OSLrandom: unsupported type")
 }
 
 func OSLnullishCoaless(a any, b any) any {
@@ -286,29 +287,6 @@ func JsonFormat(obj any) string {
 
 // Math operation wrappers for OSL behavior
 
-// Helper function to convert bool to float64
-func boolToFloat64(b bool) float64 {
-	if b {
-		return 1.0
-	}
-	return 0.0
-}
-
-// Helper function to convert bool to int
-func boolToInt(b bool) int {
-	if b {
-		return 1
-	}
-	return 0
-}
-
-func boolToStr(b bool) string {
-	if b {
-		return "1"
-	}
-	return "0"
-}
-
 func input(prompt string) string {
 	fmt.Print(prompt)
 	reader := bufio.NewReader(os.Stdin)
@@ -319,6 +297,10 @@ func input(prompt string) string {
 func OSLgetItem(a any, b any) any {
 	if a == nil {
 		return nil
+	}
+
+	if v, ok := a.(map[string]any); ok {
+		return v[OSLcastString(b)]
 	}
 
 	v := reflect.ValueOf(a)
@@ -372,15 +354,79 @@ func OSLgetItem(a any, b any) any {
 	return nil
 }
 
-func OSLjoin(a any, b any) string {
-	a = OSLcastString(a)
-	b = OSLcastString(b)
-	return OSLcastString(a) + OSLcastString(b)
+func OSLjoin[T string | []any, T2 string | []any](a T, b T2) T {
+	switch aSlice := any(a).(type) {
+	case []any:
+		switch bVal := any(b).(type) {
+		case []any:
+			return any(append(aSlice, bVal...)).(T)
+		}
+	}
+
+	return any(OSLcastString(a) + OSLcastString(b)).(T)
 }
 
-// OSLmultiply handles the * operation: multiplies numbers, repeats strings
-func OSLmultiply(a any, b any) float64 {
+func OSLadd[T float64 | int | string, T2 float64 | int | string](a T, b T2) T {
+	switch aVal := any(a).(type) {
+	case string:
+		return any(aVal + " " + OSLcastString(b)).(T)
+	case float64:
+		switch bVal := any(b).(type) {
+		case float64:
+			return any(aVal + bVal).(T)
+		case int:
+			return any(aVal + float64(bVal)).(T)
+		default:
+			return any(aVal + OSLcastNumber(b)).(T)
+		}
+	default:
+		switch bVal := any(b).(type) {
+		case float64:
+			return any(OSLcastNumber(a) + bVal).(T)
+		case int:
+			return any(OSLcastNumber(a) + float64(bVal)).(T)
+		default:
+			return any(OSLcastNumber(a) + OSLcastNumber(b)).(T)
+		}
+	}
+}
+
+func OSLsub[T float64 | int](a T, b T) T {
+	return T(OSLcastNumber(a) - OSLcastNumber(b))
+}
+
+func OSLmultiply[BT float64 | int](a any, b BT) any {
+	if str, ok := a.(string); ok {
+		n := OSLcastNumber(b)
+		if n < 0 {
+			return ""
+		}
+		return strings.Repeat(str, int(n))
+	}
+
 	return OSLcastNumber(a) * OSLcastNumber(b)
+}
+
+func OSLdivide[T float64 | int](a T, b T) T {
+	return T(OSLcastNumber(a) / OSLcastNumber(b))
+}
+
+func OSLmod[T float64 | int](a T, b T) T {
+	return T(math.Mod(OSLcastNumber(a), OSLcastNumber(b)))
+}
+
+func OSLmin[T float64 | int](a T, b T) T {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func OSLmax[T float64 | int](a T, b T) T {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func OSLround(n any) int {

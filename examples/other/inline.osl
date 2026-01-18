@@ -1,0 +1,6 @@
+
+def main() (
+  log (def(number a, number b) number -> (
+    return a + b
+  ))(10, 20)
+)

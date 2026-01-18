@@ -43,32 +43,50 @@ const (
 	TKN_BSL           = "bsl"
 )
 
+const (
+	TYPE_STR  = "string"
+	TYPE_INT  = "int"
+	TYPE_NUM  = "number"
+	TYPE_BOOL = "boolean"
+	TYPE_OBJ  = "object"
+	TYPE_ARR  = "array"
+	TYPE_UNK  = "unknown"
+)
+
+func isNumberCompatible(typeVal string) bool {
+	return strings.Contains(typeVal, TYPE_NUM) || strings.Contains(typeVal, TYPE_INT)
+}
+
+func isAbsolutelyNot(typeVal string, typeVal2 string) bool {
+	return typeVal != "" && typeVal != TYPE_UNK && typeVal != typeVal2
+}
+
 // Token represents a parsed token
 type Token struct {
-	Type             string      `json:"type"`
-	Data             interface{} `json:"data"`
-	Source           string      `json:"source,omitempty"`
-	Line             int         `json:"line,omitempty"`
-	Left             *Token      `json:"left,omitempty"`
-	Right            *Token      `json:"right,omitempty"`
-	Right2           *Token      `json:"right2,omitempty"`
-	Parameters       []*Token    `json:"parameters,omitempty"`
-	ObjPath          []*Token    `json:"obj_path,omitempty"`
-	Static           interface{} `json:"static,omitempty"`
-	ParseError       string      `json:"parse_error,omitempty"`
-	SetType          string      `json:"set_type,omitempty"`
-	Returns          string      `json:"returns,omitempty"`
-	Cases            interface{} `json:"cases,omitempty"`
-	Final            *Token      `json:"final,omitempty"`
-	Local            bool        `json:"local,omitempty"`
-	StaticAssignment bool        `json:"staticAssignment,omitempty"`
+	Type             string   `json:"type"`
+	Data             any      `json:"data"`
+	ReturnedType     string   `json:"returnedType,omitempty"`
+	Source           string   `json:"source,omitempty"`
+	Line             int      `json:"line,omitempty"`
+	Left             *Token   `json:"left,omitempty"`
+	Right            *Token   `json:"right,omitempty"`
+	Right2           *Token   `json:"right2,omitempty"`
+	Parameters       []*Token `json:"parameters,omitempty"`
+	ObjPath          []*Token `json:"obj_path,omitempty"`
+	Static           any      `json:"static,omitempty"`
+	ParseError       string   `json:"parse_error,omitempty"`
+	SetType          string   `json:"set_type,omitempty"`
+	Returns          string   `json:"returns,omitempty"`
+	Cases            any      `json:"cases,omitempty"`
+	Final            *Token   `json:"final,omitempty"`
+	Local            bool     `json:"local,omitempty"`
+	StaticAssignment bool     `json:"staticAssignment,omitempty"`
 }
 
 // FunctionSignature represents a function's type signature
 type FunctionSignature struct {
-	Accepts    []string `json:"accepts"`
-	Returns    string   `json:"returns"`
-	ReturnType string   `json:"returnType"`
+	Accepts []string `json:"accepts"`
+	Returns string   `json:"returns"`
 }
 
 // OSLUtils is the main parser utility
@@ -89,7 +107,7 @@ type OSLUtils struct {
 	macLineEndingRegex *regexp.Regexp
 
 	// Optimization settings
-	optimizationSettings map[string]interface{}
+	optimizationSettings map[string]any
 	variableUsage        map[string]int
 	definedVariables     map[string]bool
 
@@ -126,10 +144,10 @@ func NewOSLUtils() *OSLUtils {
 		bitwise:     []string{"|", "&", "<<", ">>", "^^"},
 		unary:       []string{"typeof", "new"},
 
-		inlinableFunctions:  make(map[string]interface{}),
+		inlinableFunctions:  make(map[string]any),
 		functionReturnTypes: make(map[string]FunctionSignature),
 
-		optimizationSettings: map[string]interface{}{
+		optimizationSettings: map[string]any{
 			"maxLoopUnrollCount":  8,
 			"maxLoopUnrollSize":   50,
 			"deadCodeElimination": true,
@@ -661,10 +679,10 @@ func (utils *OSLUtils) StringToToken(cur string, param bool) *Token {
 
 	if len(cur) >= 2 {
 		if start == '"' && cur[len(cur)-1] == '"' {
-			return &Token{Type: TKN_STR, Data: Destr(cur, "")}
+			return &Token{Type: TKN_STR, Data: Destr(cur, ""), ReturnedType: TYPE_STR}
 		}
 		if start == '\'' && cur[len(cur)-1] == '\'' {
-			return &Token{Type: TKN_STR, Data: Destr(cur, "'")}
+			return &Token{Type: TKN_STR, Data: Destr(cur, "'"), ReturnedType: TYPE_STR}
 		}
 		if start == '`' && cur[len(cur)-1] == '`' {
 			templateData := ParseTemplate(Destr(cur, "`"))
@@ -678,11 +696,11 @@ func (utils *OSLUtils) StringToToken(cur string, param bool) *Token {
 						}
 						filteredData = append(filteredData, ast[0])
 					} else {
-						filteredData = append(filteredData, &Token{Type: TKN_STR, Data: v})
+						filteredData = append(filteredData, &Token{Type: TKN_STR, Data: v, ReturnedType: TYPE_STR})
 					}
 				}
 			}
-			return &Token{Type: TKN_TSR, Data: filteredData}
+			return &Token{Type: TKN_TSR, Data: filteredData, ReturnedType: TYPE_STR}
 		}
 	}
 
@@ -728,7 +746,7 @@ func (utils *OSLUtils) StringToToken(cur string, param bool) *Token {
 					if param {
 						return &Token{Type: TKN_MTV, Data: "item", Parameters: []*Token{}}
 					} else {
-						return &Token{Type: TKN_ARR, Data: []*Token{}}
+						return &Token{Type: TKN_ARR, Data: []*Token{}, ReturnedType: TYPE_ARR}
 					}
 				}
 
@@ -761,7 +779,7 @@ func (utils *OSLUtils) StringToToken(cur string, param bool) *Token {
 				return arr
 			} else if cur[0] == '{' {
 				if cur == "{}" {
-					return &Token{Type: TKN_OBJ, Data: nil}
+					return &Token{Type: TKN_OBJ, Data: nil, ReturnedType: TYPE_OBJ}
 				}
 
 				var output = [][]*Token{}
@@ -813,7 +831,7 @@ func (utils *OSLUtils) StringToToken(cur string, param bool) *Token {
 						output = append(output, []*Token{key_ast[0], ast[0]})
 					}
 				}
-				return &Token{Type: TKN_OBJ, Data: output}
+				return &Token{Type: TKN_OBJ, Data: output, ReturnedType: TYPE_OBJ}
 			}
 		}
 	}
@@ -920,23 +938,26 @@ func (utils *OSLUtils) evalASTNode(node *Token) *Token {
 		}
 
 		right := node.Right
-		if right != nil {
-			if rightData, ok := right.Data.(string); ok {
-				if !strings.HasPrefix(strings.TrimSpace(rightData), "(\n") && node.Left != nil {
-					right.Data = fmt.Sprintf("(\nreturn %s\n)", right.Source)
-				}
-			}
-		} else {
+		if right == nil {
 			panic("No body for inline function")
 		}
 
+		if right.Type != TKN_BLK {
+			right = &Token{
+				Type:   TKN_BLK,
+				Data:   [][]*Token{{right}},
+				Source: fmt.Sprintf("(\nreturn %s\n)", right.Source),
+			}
+		}
+
 		return &Token{
-			Type: TKN_FNC,
-			Data: "function",
+			Type:    TKN_FNC,
+			Data:    "function",
+			Returns: node.Returns,
 			Parameters: []*Token{
 				{Type: TKN_STR, Data: params, Source: params},
 				right,
-				{Type: TKN_UNK, Data: !strings.HasPrefix(node.Source, "def(")},
+				{Type: TKN_UNK, Data: true},
 			},
 		}
 	}
@@ -1022,6 +1043,16 @@ func (utils *OSLUtils) GenerateAST(code string, start int, main bool) []*Token {
 						ast = append(ast[:i+1], ast[i+2:]...)
 					}
 					continue
+				}
+
+				if nodeType == TKN_INL {
+					if i >= 2 && prev != nil && (prev.Type == TKN_VAR || prev.Type == TKN_UNK) &&
+						prev.Type != TKN_FNC && prev.Type != TKN_MTV {
+						cur.Returns = prev.Source
+						prev = ast[i-2]
+						ast = append(ast[:i-1], ast[i:]...)
+						i--
+					}
 				}
 
 				if cur.Left == nil && prev != nil && next != nil {
@@ -1141,8 +1172,8 @@ func (utils *OSLUtils) GenerateAST(code string, start int, main bool) []*Token {
 						}
 
 						utils.functionReturnTypes[funcName] = FunctionSignature{
-							ReturnType: returnType,
-							Accepts:    paramTypes,
+							Returns: returnType,
+							Accepts: paramTypes,
 						}
 					}
 				}

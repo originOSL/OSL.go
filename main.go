@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -36,6 +37,9 @@ Commands:
 
 For more information, visit: https://origin.mistium.com`
 )
+
+var parser = NewOSLUtils()
+var allFunctionTypes = map[string]FunctionSignature{}
 
 func setup() {
 	fmt.Println("Setting up OSL.go environment...")
@@ -106,8 +110,9 @@ func openFile(path string) string {
 }
 
 func scriptToAst(script string) [][]*Token {
-	parser := NewOSLUtils()
 	ast := parser.GenerateFullAST(script, true)
+	functionTypes := parser.functionReturnTypes
+	maps.Copy(allFunctionTypes, functionTypes)
 	return ast
 }
 

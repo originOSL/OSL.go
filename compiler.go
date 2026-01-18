@@ -9,7 +9,6 @@ import (
 	"os"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 )
 
@@ -17,14 +16,15 @@ import (
 var packagesFS embed.FS
 
 type VariableContext struct {
-	DeclaredVars  map[string]bool
-	VariableTypes map[string]string
-	Indent        int
-	Globals       map[string]any
-	Locals        map[string]any
-	Prepend       map[string]string
-	Imports       map[string]bool
-	ImportOrder   []string
+	DeclaredVars        map[string]bool
+	VariableTypes       map[string]string
+	functionReturnTypes map[string]string
+	Indent              int
+	Globals             map[string]any
+	Locals              map[string]any
+	Prepend             map[string]string
+	Imports             map[string]bool
+	ImportOrder         []string
 }
 
 func include(path string) string {
@@ -172,8 +172,9 @@ func Compile(ast [][]*Token) string {
 			"math",
 			"runtime",
 		},
-		DeclaredVars:  make(map[string]bool),
-		VariableTypes: make(map[string]string),
+		DeclaredVars:        make(map[string]bool),
+		VariableTypes:       make(map[string]string),
+		functionReturnTypes: make(map[string]string),
 	}
 
 	mainCompiled := CompileBlock(ast, ctx)
@@ -382,32 +383,35 @@ func CompileToken(token *Token, ctx VariableContext) string {
 
 				switch tokenType {
 				case "string":
-					if !strings.HasPrefix(compiledRight, "OSLcastString(") {
+					if token.Right.ReturnedType != TYPE_STR {
 						compiledRight = fmt.Sprintf("OSLcastString(%v)", compiledRight)
 					}
 				case "int":
-					_, err := strconv.ParseInt(compiledRight, 10, 64)
-					if err != nil && !strings.HasPrefix(compiledRight, "OSLcastInt(") {
+					if token.Right.ReturnedType == TYPE_NUM {
+						if after, ok := strings.CutPrefix(compiledRight, "OSLcastNumber("); ok {
+							compiledRight = fmt.Sprintf("OSLcastInt(%v", after)
+						} else {
+							compiledRight = fmt.Sprintf("int(%v)", compiledRight)
+						}
+					} else if token.Right.ReturnedType != TYPE_INT {
 						compiledRight = fmt.Sprintf("OSLcastInt(%v)", compiledRight)
 					}
 				case "number":
-					if !strings.HasPrefix(compiledRight, "OSLcastNumber(") {
+					if token.Right.ReturnedType != TYPE_NUM {
 						compiledRight = fmt.Sprintf("OSLcastNumber(%v)", compiledRight)
 					}
 				case "boolean":
-					if !strings.HasPrefix(compiledRight, "OSLcastBool(") {
+					if token.Right.ReturnedType != TYPE_BOOL {
 						compiledRight = fmt.Sprintf("bool(%v)", compiledRight)
 					}
 				case "array":
-					if strings.HasPrefix(compiledRight, "[]any{") {
-						ctx.VariableTypes[varName] = "[]any"
-					} else if !strings.HasPrefix(compiledRight, "OSLcastArray(") {
+					ctx.VariableTypes[varName] = "[]any"
+					if token.Right.ReturnedType != TYPE_ARR {
 						compiledRight = fmt.Sprintf("OSLcastArray(%v)", compiledRight)
 					}
 				case "object":
-					if strings.HasPrefix(compiledRight, "map[string]any{") {
-						ctx.VariableTypes[varName] = "map[string]any"
-					} else if !strings.HasPrefix(compiledRight, "OSLcastObject(") {
+					ctx.VariableTypes[varName] = "map[string]any"
+					if token.Right.ReturnedType != TYPE_OBJ {
 						compiledRight = fmt.Sprintf("OSLcastObject(%v)", compiledRight)
 					}
 				}
@@ -449,15 +453,6 @@ func CompileToken(token *Token, ctx VariableContext) string {
 						compiledRight = fmt.Sprintf("OSLcastBool(%v)", compiledRight)
 					}
 				}
-				if expectedType != "" {
-					if strings.Contains(compiledRight, "JsonParse(") && expectedType == "map[string]any" {
-						compiledRight = fmt.Sprintf("%v.(map[string]any)", compiledRight)
-					} else if strings.Contains(compiledRight, "func() *multipart.FileHeader") && expectedType != "*multipart.FileHeader" {
-						if expectedType == "map[string]any" {
-							ctx.VariableTypes[leftVar] = "*multipart.FileHeader"
-						}
-					}
-				}
 			}
 
 			if op == ":=" {
@@ -475,23 +470,43 @@ func CompileToken(token *Token, ctx VariableContext) string {
 		compiledLeft := CompileToken(token.Left, ctx)
 		compiledRight := CompileToken(token.Right, ctx)
 
+		LT := token.Left.ReturnedType
+		RT := token.Right.ReturnedType
+
 		switch token.Data {
 		case "??":
 			return fmt.Sprintf("OSLnullishCoaless(%v, %v)", compiledLeft, compiledRight)
 		case "+":
-			if strings.Contains(compiledLeft, "OSLgetItem(") && strings.Contains(compiledLeft, "\"ID\"") {
-				compiledLeft = fmt.Sprintf("OSLcastInt(%v)", compiledLeft)
+			if isNumberCompatible(LT) && isNumberCompatible(RT) {
+				if LT == TYPE_INT {
+					compiledLeft = fmt.Sprintf("float64(%v)", compiledLeft)
+				}
+				if RT == TYPE_INT {
+					compiledRight = fmt.Sprintf("float64(%v)", compiledRight)
+				}
+
+				token.ReturnedType = TYPE_NUM
+				return fmt.Sprintf("(%v + %v)", compiledLeft, compiledRight)
 			}
-			if strings.Contains(compiledRight, "OSLgetItem(") && strings.Contains(compiledRight, "\"ID\"") {
-				compiledRight = fmt.Sprintf("OSLcastInt(%v)", compiledRight)
+			return fmt.Sprintf("OSLadd(%v, %v)", compiledLeft, compiledRight)
+		case "-":
+			if LT != "" || RT != "" {
+				token.ReturnedType = TYPE_NUM
+				return fmt.Sprintf("(%v - %v)", compiledLeft, compiledRight)
 			}
-			return fmt.Sprintf("%v + %v", compiledLeft, compiledRight)
-		case "++":
-			return fmt.Sprintf("OSLjoin(%v, %v)", compiledLeft, compiledRight)
-		case "-", "/", "%":
-			return fmt.Sprintf("(%v %v %v)", compiledLeft, token.Data, compiledRight)
+			return fmt.Sprintf("OSLsub(%v, %v)", compiledLeft, compiledRight)
 		case "*":
 			return fmt.Sprintf("OSLmultiply(%v, %v)", compiledLeft, compiledRight)
+		case "/":
+			return fmt.Sprintf("OSLdivide(%v, %v)", compiledLeft, compiledRight)
+		case "%":
+			return fmt.Sprintf("OSLmod(%v, %v)", compiledLeft, compiledRight)
+		case "++":
+			if isAbsolutelyNot(LT, TYPE_ARR) || isAbsolutelyNot(RT, TYPE_ARR) {
+				token.ReturnedType = TYPE_STR
+				return fmt.Sprintf("(%v + %v)", compiledLeft, compiledRight)
+			}
+			return fmt.Sprintf("OSLjoin(%v, %v)", compiledLeft, compiledRight)
 		}
 		return fmt.Sprintf("%v %v %v", compiledLeft, token.Data, compiledRight)
 	case TKN_EVL:
@@ -520,12 +535,16 @@ func CompileToken(token *Token, ctx VariableContext) string {
 		case "or":
 			op = "||"
 		}
+		token.ReturnedType = TYPE_BOOL
 		return fmt.Sprintf("%v %v %v", CompileToken(token.Left, ctx), op, CompileToken(token.Right, ctx))
 	case TKN_BIT:
+		token.ReturnedType = TYPE_BOOL
 		return fmt.Sprintf("%v %v %v", CompileToken(token.Left, ctx), token.Data, CompileToken(token.Right, ctx))
 	case TKN_STR:
+		token.ReturnedType = TYPE_STR
 		return JsonStringify(token.Data)
 	case TKN_NUM:
+		token.ReturnedType = TYPE_NUM
 		return fmt.Sprintf("%v", token.Data)
 	case TKN_VAR:
 		varName := token.Data.(string)
@@ -536,16 +555,20 @@ func CompileToken(token *Token, ctx VariableContext) string {
 		case "null":
 			return "nil"
 		case "timestamp":
+			token.ReturnedType = TYPE_NUM
 			return "OSLcastNumber(time.Now().UnixMilli())"
 		case "performance":
+			token.ReturnedType = TYPE_NUM
 			return "OSLcastNumber(time.Now().UnixMicro())"
 		}
 		return varName
 	case TKN_RAW:
 		switch v := token.Data.(type) {
 		case bool:
+			token.ReturnedType = TYPE_BOOL
 			return fmt.Sprintf("%t", v)
 		case string:
+			token.ReturnedType = TYPE_STR
 			return v
 		default:
 			return fmt.Sprintf("%v", v)
@@ -559,6 +582,7 @@ func CompileToken(token *Token, ctx VariableContext) string {
 		ctx.Indent++
 		arr := CompileArray(token.Data.([]*Token), ctx)
 		ctx.Indent--
+		token.ReturnedType = TYPE_ARR
 		return arr
 	case TKN_OBJ:
 		ctx.Indent++
@@ -567,6 +591,7 @@ func CompileToken(token *Token, ctx VariableContext) string {
 		}
 		obj := CompileObject(token.Data.([][]*Token), ctx)
 		ctx.Indent--
+		token.ReturnedType = TYPE_OBJ
 		return AddIndent(obj, 1)
 	case TKN_RMT:
 		var path []*Token
@@ -610,7 +635,7 @@ func CompileToken(token *Token, ctx VariableContext) string {
 		switch token.Data {
 		case "function":
 			ctx.Indent++
-			paramString := ""
+			var paramString strings.Builder
 			if len(params) > 0 {
 				args := strings.Split(params[0].Data.(string), ",")
 				for i, arg := range args {
@@ -625,10 +650,14 @@ func CompileToken(token *Token, ctx VariableContext) string {
 						typeName = mapOSLTypeToGo(parts[1])
 						varName = parts[0]
 					}
-					paramString += fmt.Sprintf("%v %v, ", varName, typeName)
+					fmt.Fprintf(&paramString, "%v %v, ", varName, typeName)
 				}
 			}
-			out := fmt.Sprintf("func(%v) {\n", strings.TrimSuffix(paramString, ", "))
+			returns := " "
+			if len(params) > 1 {
+				returns = mapOSLTypeToGo(token.Returns) + " "
+			}
+			out := fmt.Sprintf("(func(%v) %v{\n", strings.TrimSuffix(paramString.String(), ", "), returns)
 			ctx.Indent++
 			if len(params) > 1 {
 				blk := params[1]
@@ -636,11 +665,12 @@ func CompileToken(token *Token, ctx VariableContext) string {
 					out += CompileBlock(blk.Data.([][]*Token), ctx)
 				}
 			}
-			out += AddIndent("}", (ctx.Indent-2)*2)
+			out += AddIndent("})", (ctx.Indent-2)*2)
 			ctx.Indent--
 			return out
 		case "typeof":
 			if len(token.Parameters) > 0 {
+				token.ReturnedType = TYPE_STR
 				return fmt.Sprintf("OSLtypeof(%v)", CompileToken(token.Parameters[0], ctx))
 			}
 			panic("typeof osl function needs 1 parameter")
@@ -650,31 +680,48 @@ func CompileToken(token *Token, ctx VariableContext) string {
 			}
 		case "round":
 			if len(token.Parameters) > 0 {
+				token.ReturnedType = TYPE_INT
 				return fmt.Sprintf("OSLround(%v)", CompileToken(token.Parameters[0], ctx))
 			}
 		case "ceil":
 			if len(token.Parameters) > 0 {
+				token.ReturnedType = TYPE_INT
 				return fmt.Sprintf("OSLceil(%v)", CompileToken(token.Parameters[0], ctx))
 			}
 		case "floor":
 			if len(token.Parameters) > 0 {
+				token.ReturnedType = TYPE_INT
 				return fmt.Sprintf("OSLfloor(%v)", CompileToken(token.Parameters[0], ctx))
+			}
+		case "min":
+			if len(token.Parameters) > 0 {
+				token.ReturnedType = TYPE_NUM
+				return fmt.Sprintf("OSLmin(%v, %v)", CompileToken(token.Parameters[0], ctx), CompileToken(token.Parameters[1], ctx))
+			}
+		case "max":
+			if len(token.Parameters) > 0 {
+				token.ReturnedType = TYPE_NUM
+				return fmt.Sprintf("OSLmax(%v, %v)", CompileToken(token.Parameters[0], ctx), CompileToken(token.Parameters[1], ctx))
 			}
 		case "raw":
 			if len(token.Parameters) > 0 {
 				return fmt.Sprintf("%v", token.Parameters[0].Data)
 			}
 		default:
-			paramString := ""
+			var paramString strings.Builder
 			if len(token.Parameters) > 0 {
 				for i, p := range params {
-					paramString += CompileToken(p, ctx)
+					paramString.WriteString(CompileToken(p, ctx))
 					if i < len(token.Parameters)-1 {
-						paramString += ", "
+						paramString.WriteString(", ")
 					}
 				}
 			}
-			return fmt.Sprintf("%v(%v)", token.Data, paramString)
+			functionReturnType, ok := allFunctionTypes[token.Data.(string)]
+			if ok {
+				token.ReturnedType = functionReturnType.Returns
+			}
+			return fmt.Sprintf("%v(%v)", token.Data, paramString.String())
 		}
 	case TKN_URY:
 		op := token.Data
@@ -683,6 +730,7 @@ func CompileToken(token *Token, ctx VariableContext) string {
 			op = "&"
 		}
 		if op == "!" {
+			token.ReturnedType = TYPE_BOOL
 			return fmt.Sprintf("(%v != true)", value)
 		}
 		return fmt.Sprintf("%v%v", op, value)
@@ -710,6 +758,7 @@ func CompileToken(token *Token, ctx VariableContext) string {
 			}
 		}
 		out = CompileToken(first, ctx)
+		previous := first
 		parts = parts[1:]
 		for _, part := range parts {
 			name := part.Data.(string)
@@ -717,19 +766,13 @@ func CompileToken(token *Token, ctx VariableContext) string {
 			case TKN_VAR:
 				switch name {
 				case "len":
+					part.ReturnedType = TYPE_INT
 					out = fmt.Sprintf("OSLlen(%v)", out)
 				default:
-					if strings.Contains(out, "OSLgetItem(") && strings.Contains(out, "\"Request\"") {
-						if name == "Context" || name == "WithContext" {
-							out = strings.Replace(out, "OSLgetItem(", "", 1)
-							out = strings.Replace(out, ", \"Request\")", ".Request", 1)
-							out = fmt.Sprintf("%v.%v", out, name)
-						} else {
-							out = fmt.Sprintf("OSLgetItem(%v, \"%v\")", out, name)
-						}
-					} else {
-						out = fmt.Sprintf("OSLgetItem(%v, \"%v\")", out, name)
+					if previous.ReturnedType == TYPE_OBJ {
+						out = fmt.Sprintf("%v[OSLcastString(%v)]", out, name)
 					}
+					out = fmt.Sprintf("OSLgetItem(%v, \"%v\")", out, name)
 				}
 			case TKN_MTV:
 				params := make([]string, len(part.Parameters))
@@ -737,84 +780,115 @@ func CompileToken(token *Token, ctx VariableContext) string {
 					params[i] = CompileToken(p, ctx)
 				}
 				switch name {
+				case "call":
+					out = fmt.Sprintf("%v(%v)", out, strings.Join(params, ", "))
 				case "toStr":
+					part.ReturnedType = TYPE_STR
 					out = fmt.Sprintf("OSLcastString(%v)", out)
 				case "toInt":
+					part.ReturnedType = TYPE_INT
 					out = fmt.Sprintf("OSLcastInt(%v)", out)
 				case "toNum":
+					part.ReturnedType = TYPE_NUM
 					out = fmt.Sprintf("OSLcastNumber(%v)", out)
 				case "toBool":
+					part.ReturnedType = TYPE_BOOL
 					out = fmt.Sprintf("OSLcastBool(%v)", out)
 				case "toArray":
+					part.ReturnedType = TYPE_ARR
 					out = fmt.Sprintf("OSLcastArray(%v)", out)
 				case "toObject":
+					part.ReturnedType = TYPE_OBJ
 					out = fmt.Sprintf("OSLcastObject(%v)", out)
 				case "pop":
+					part.ReturnedType = TYPE_UNK
 					out = fmt.Sprintf("OSLpop(&(%v))", out)
 				case "shift":
+					part.ReturnedType = TYPE_UNK
 					out = fmt.Sprintf("OSLshift(&(%v))", out)
 				case "to":
 					if len(params) > 1 {
+						part.ReturnedType = TYPE_ARR
 						out = fmt.Sprintf("OSLto(%v, %v)", out, params[0])
 					}
 				case "append":
 					if len(params) > 0 {
+						part.ReturnedType = TYPE_ARR
 						out = fmt.Sprintf("OSLappend(&(%v), %v)", out, params[0])
 					}
 				case "prepend":
 					if len(params) > 0 {
+						part.ReturnedType = TYPE_ARR
 						out = fmt.Sprintf("OSLprepend(&(%v), %v)", out, params[0])
 					}
 				case "in":
 					if len(params) > 0 {
+						part.ReturnedType = TYPE_BOOL
 						out = fmt.Sprintf("OSLKeyIn(%v, %v)", params[0], out)
 					}
 				case "ask":
+					part.ReturnedType = TYPE_STR
 					out = fmt.Sprintf("input(%v)", out)
 				case "chr":
+					part.ReturnedType = TYPE_STR
 					out = fmt.Sprintf("string(rune(OSLcastInt(%v)))", out)
 				case "ord":
+					part.ReturnedType = TYPE_INT
 					out = fmt.Sprintf("int(OSLcastString(%v)[0])", out)
 				case "toLower":
+					part.ReturnedType = TYPE_STR
 					out = fmt.Sprintf("strings.ToLower(%v)", out)
 				case "toUpper":
+					part.ReturnedType = TYPE_STR
 					out = fmt.Sprintf("strings.ToUpper(%v)", out)
 				case "getKeys":
+					part.ReturnedType = TYPE_ARR
 					out = fmt.Sprintf("OSLgetKeys(%v)", out)
 				case "getValues":
+					part.ReturnedType = TYPE_ARR
 					out = fmt.Sprintf("OSLgetValues(%v)", out)
 				case "floor":
+					part.ReturnedType = TYPE_INT
 					out = fmt.Sprintf("OSLfloor(%v)", out)
 				case "ceil":
+					part.ReturnedType = TYPE_INT
 					out = fmt.Sprintf("OSLceil(%v)", out)
 				case "round":
+					part.ReturnedType = TYPE_INT
 					out = fmt.Sprintf("OSLround(%v)", out)
 				case "startsWith":
 					if len(params) > 0 {
+						part.ReturnedType = TYPE_BOOL
 						out = fmt.Sprintf("strings.HasPrefix(%v, %v)", out, params[0])
 					}
 				case "endsWith":
 					if len(params) > 0 {
+						part.ReturnedType = TYPE_BOOL
 						out = fmt.Sprintf("strings.HasSuffix(%v, %v)", out, params[0])
 					}
 				case "contains":
 					if len(params) > 0 {
+						part.ReturnedType = TYPE_BOOL
 						out = fmt.Sprintf("OSLcontains(%v, %v)", out, params[0])
 					}
 				case "index":
 					if len(params) > 0 {
+						part.ReturnedType = TYPE_NUM
 						out = fmt.Sprintf("(strings.Index(%v, %v) + 1)", out, params[0])
 					}
 				case "strip":
+					part.ReturnedType = TYPE_STR
 					out = fmt.Sprintf("strings.TrimSpace(%v)", out)
 				case "clone":
 					out = fmt.Sprintf("OSLclone(%v)", out)
 				case "join":
 					if len(params) > 0 {
+						part.ReturnedType = TYPE_STR
 						out = fmt.Sprintf("OSLarrayJoin(%v, %v)", out, params[0])
 					}
 				case "split":
 					if len(params) > 0 {
+						part.ReturnedType = TYPE_ARR
 						out = fmt.Sprintf("strings.Split(%v, %v)", out, params[0])
 					}
 				case "delete":
@@ -833,38 +907,52 @@ func CompileToken(token *Token, ctx VariableContext) string {
 					} else if len(params) > 0 {
 						out = fmt.Sprintf("OSLtrim(%v, %v, -1)", out, params[0])
 					} else {
+						part.ReturnedType = TYPE_STR
 						out = fmt.Sprintf("strings.TrimSpace(%v)", out)
 					}
 				case "JsonStringify":
+					part.ReturnedType = TYPE_STR
 					out = fmt.Sprintf("JsonStringify(%v)", out)
 				case "JsonParse":
 					out = fmt.Sprintf("JsonParse(%v)", out)
 				case "JsonFormat":
+					part.ReturnedType = TYPE_STR
 					out = fmt.Sprintf("JsonFormat(%v)", out)
 				case "stripStart":
 					if len(params) > 0 {
+						part.ReturnedType = TYPE_STR
 						out = fmt.Sprintf("strings.TrimPrefix(%v, %v)", out, params[0])
 					}
 				case "stripEnd":
 					if len(params) > 0 {
+						part.ReturnedType = TYPE_STR
 						out = fmt.Sprintf("strings.TrimSuffix(%v, %v)", out, params[0])
 					}
 				case "padStart":
 					if len(params) > 1 {
+						part.ReturnedType = TYPE_STR
 						out = fmt.Sprintf("OSLpadStart(%v, int(OSLcastNumber(%v)), %v)", out, params[1], params[0])
 					}
 				case "padEnd":
 					if len(params) > 1 {
+						part.ReturnedType = TYPE_STR
 						out = fmt.Sprintf("OSLpadEnd(%v, int(OSLcastNumber(%v)), %v)", out, params[1], params[0])
 					}
 				case "assert":
 					if len(params) > 0 {
 						paramStr := strings.Trim(params[0], "\"")
+
 						goType := mapOSLTypeToGo(paramStr)
+						if goType != paramStr {
+							part.ReturnedType = paramStr
+						}
 						out = fmt.Sprintf("%v.(%v)", out, goType)
 					}
 				case "item":
 					if len(params) > 0 {
+						if previous.ReturnedType == TYPE_OBJ {
+							out = fmt.Sprintf("%v[OSLcastString(%v)]", out, params[0])
+						}
 						out = fmt.Sprintf("OSLgetItem(%v, %v)", out, params[0])
 					}
 				default:
@@ -875,7 +963,9 @@ func CompileToken(token *Token, ctx VariableContext) string {
 					out = fmt.Sprintf("%v.%v(%v)", out, name, strings.Join(params, ", "))
 				}
 			}
+			previous = part
 		}
+		token.ReturnedType = previous.ReturnedType
 		return out
 	case TKN_UNK:
 		if data, ok := token.Data.(string); ok {
@@ -971,6 +1061,12 @@ func CompileCmd(cmd []*Token, ctx VariableContext) string {
 		loopNumber := CompileToken(cmd[2], ctx)
 		blk := cmd[3]
 		ctx.Indent++
+		returnType := cmd[2].ReturnedType
+		if returnType == TYPE_NUM {
+			loopNumber = fmt.Sprintf("int(%v)", loopNumber)
+		} else if returnType != TYPE_INT {
+			loopNumber = fmt.Sprintf("OSLround(%v)", loopNumber)
+		}
 		out += fmt.Sprintf("for %v := 1; %v <= %v; %v++ {\n", iteratorVar, iteratorVar, loopNumber, iteratorVar)
 		out += CompileBlock(blk.Data.([][]*Token), ctx)
 		ctx.Indent--
@@ -1091,7 +1187,8 @@ func CompileCmd(cmd []*Token, ctx VariableContext) string {
 }
 
 func CompileObject(obj [][]*Token, ctx VariableContext) string {
-	var out string = "map[string]any{\n"
+	var out strings.Builder
+	out.WriteString("map[string]any{\n")
 	for _, token := range obj {
 		keyStr := ""
 		switch token[0].Type {
@@ -1107,28 +1204,29 @@ func CompileObject(obj [][]*Token, ctx VariableContext) string {
 		}
 		if len(token) > 1 {
 			valueStr := CompileToken(token[1], ctx)
-			out += AddIndent(fmt.Sprintf("%v: %v,\n", keyStr, valueStr), ctx.Indent*2)
+			out.WriteString(AddIndent(fmt.Sprintf("%v: %v,\n", keyStr, valueStr), ctx.Indent*2))
 		}
 	}
-	return out + AddIndent("}", (ctx.Indent-1)*2)
+	return out.String() + AddIndent("}", (ctx.Indent-1)*2)
 }
 
 func CompileArray(arr []*Token, ctx VariableContext) string {
 	if len(arr) == 0 {
 		return "[]any{}"
 	}
-	var out string = "[]any{\n"
+	var out strings.Builder
+	out.WriteString("[]any{\n")
 	for _, token := range arr {
-		out += AddIndent(fmt.Sprintf("%v,\n", CompileToken(token, ctx)), ctx.Indent*2)
+		out.WriteString(AddIndent(fmt.Sprintf("%v,\n", CompileToken(token, ctx)), ctx.Indent*2))
 	}
-	return out + AddIndent("}", (ctx.Indent-1)*2)
+	return out.String() + AddIndent("}", (ctx.Indent-1)*2)
 }
 
 func AddIndent(str string, indent int) string {
-	var out string
+	var out strings.Builder
 	for range indent {
-		out += " "
+		out.WriteString(" ")
 	}
-	out += str
-	return out
+	out.WriteString(str)
+	return out.String()
 }
