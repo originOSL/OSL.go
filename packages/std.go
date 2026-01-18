@@ -366,29 +366,8 @@ func OSLjoin[T string | []any, T2 string | []any](a T, b T2) T {
 	return any(OSLcastString(a) + OSLcastString(b)).(T)
 }
 
-func OSLadd[T float64 | int | string, T2 float64 | int | string](a T, b T2) T {
-	switch aVal := any(a).(type) {
-	case string:
-		return any(aVal + " " + OSLcastString(b)).(T)
-	case float64:
-		switch bVal := any(b).(type) {
-		case float64:
-			return any(aVal + bVal).(T)
-		case int:
-			return any(aVal + float64(bVal)).(T)
-		default:
-			return any(aVal + OSLcastNumber(b)).(T)
-		}
-	default:
-		switch bVal := any(b).(type) {
-		case float64:
-			return any(OSLcastNumber(a) + bVal).(T)
-		case int:
-			return any(OSLcastNumber(a) + float64(bVal)).(T)
-		default:
-			return any(OSLcastNumber(a) + OSLcastNumber(b)).(T)
-		}
-	}
+func OSLadd[T float64 | int](a T, b T) T {
+	return T(OSLcastNumber(a) + OSLcastNumber(b))
 }
 
 func OSLsub[T float64 | int](a T, b T) T {
