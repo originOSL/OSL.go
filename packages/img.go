@@ -211,6 +211,19 @@ func (IMG) Resize(i *OSL_img_Image, width, height int) *OSL_img_Image {
 	return OSL_newImage(OSL_toRGBA(resized))
 }
 
+func (IMG) ResizeFast(i *OSL_img_Image, width, height int) *OSL_img_Image {
+	if i == nil || i.closed || i.im == nil {
+		return nil
+	}
+
+	if width <= 0 || height <= 0 || width > imgMaxDim || height > imgMaxDim {
+		return nil
+	}
+
+	resized := OSL_img_resize.Resize(uint(width), uint(height), i.im, OSL_img_resize.Bilinear)
+	return OSL_newImage(OSL_toRGBA(resized))
+}
+
 func (IMG) Rotate(i *OSL_img_Image, angle float64) *OSL_img_Image {
 	if i == nil || i.closed || i.im == nil {
 		return nil
