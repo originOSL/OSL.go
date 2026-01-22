@@ -79,13 +79,17 @@ func processImports(ctx VariableContext) (compiled string, goImports []string) {
 
 	for _, importPath := range orderedImports {
 		switch {
-		case strings.HasPrefix(importPath, "./") && strings.HasSuffix(importPath, ".osl"):
+		case strings.HasPrefix(importPath, "./"):
 			data, err := os.ReadFile(strings.TrimPrefix(importPath, "./"))
 			if err != nil {
 				panic(err)
 			}
-			compiledBlock := CompileBlock(scriptToAst(string(data)), ctx)
-			compiled += "\n" + compiledBlock
+			if strings.HasSuffix(importPath, ".osl") {
+				compiledBlock := CompileBlock(scriptToAst(string(data)), ctx)
+				compiled += "\n" + compiledBlock
+			} else if strings.HasSuffix(importPath, ".go") {
+				compiled += "\n" + string(data)
+			}
 
 		case strings.HasPrefix(importPath, "osl/"):
 			packageName := strings.TrimPrefix(importPath, "osl/")
