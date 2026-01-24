@@ -160,6 +160,7 @@ func Compile(ast [][]*Token) string {
 			"time":          true,
 			"math":          true,
 			"runtime":       true,
+			"sort":          true,
 		},
 		ImportOrder: []string{
 			"fmt",
@@ -175,6 +176,7 @@ func Compile(ast [][]*Token) string {
 			"time",
 			"math",
 			"runtime",
+			"sort",
 		},
 		DeclaredVars:        make(map[string]bool),
 		VariableTypes:       make(map[string]string),

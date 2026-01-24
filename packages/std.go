@@ -157,25 +157,28 @@ func OSLsort(arr any) any {
 		return nil
 	}
 
-	switch arr := arr.(type) {
+	switch v := arr.(type) {
 	case []any:
-		sort.Slice(arr, func(i, j int) bool {
-			return OSLcastString(arr[i]) < OSLcastString(arr[j])
+		sort.Slice(v, func(i, j int) bool {
+			return OSLcastString(v[i]) < OSLcastString(v[j])
 		})
-		return arr
+		return v
+
 	case map[string]any:
-		keys := make([]string, 0, len(arr))
-		for k := range arr {
+		keys := make([]string, 0, len(v))
+		for k := range v {
 			keys = append(keys, k)
 		}
 		sort.Strings(keys)
-		sorted := make(map[string]any, len(arr))
+
+		sorted := make(map[string]any, len(v))
 		for _, k := range keys {
-			sorted[k] = arr[k]
+			sorted[k] = v[k]
 		}
 		return sorted
+
 	default:
-		panic("OSLsort, invalid type: " + reflect.TypeOf(arr).String())
+		panic("OSLsort: invalid type: " + reflect.TypeOf(arr).String())
 	}
 }
 
@@ -184,25 +187,38 @@ func OSLsortBy(arr any, key string) any {
 		return nil
 	}
 
-	switch arr := arr.(type) {
+	switch v := arr.(type) {
 	case []any:
-		sort.Slice(arr, func(i, j int) bool {
-			return OSLcastString(arr[i][key]) < OSLcastString(arr[j][key])
+		sort.Slice(v, func(i, j int) bool {
+			ai, ok1 := v[i].(map[string]any)
+			aj, ok2 := v[j].(map[string]any)
+
+			if !ok1 || !ok2 {
+				return false
+			}
+
+			vi, _ := ai[key]
+			vj, _ := aj[key]
+
+			return OSLcastString(vi) < OSLcastString(vj)
 		})
-		return arr
+		return v
+
 	case map[string]any:
-		keys := make([]string, 0, len(arr))
-		for k := range arr {
+		keys := make([]string, 0, len(v))
+		for k := range v {
 			keys = append(keys, k)
 		}
 		sort.Strings(keys)
-		sorted := make(map[string]any, len(arr))
+
+		sorted := make(map[string]any, len(v))
 		for _, k := range keys {
-			sorted[k] = arr[k]
+			sorted[k] = v[k]
 		}
 		return sorted
+
 	default:
-		panic("OSLsortBy, invalid type: " + reflect.TypeOf(arr).String())
+		panic("OSLsortBy: invalid type: " + reflect.TypeOf(arr).String())
 	}
 }
 
