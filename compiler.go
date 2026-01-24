@@ -903,7 +903,7 @@ func CompileToken(token *Token, ctx VariableContext) string {
 				case "split":
 					if len(params) > 0 {
 						part.ReturnedType = TYPE_ARR
-						out = fmt.Sprintf("strings.Split(%v, %v)", out, params[0])
+						out = fmt.Sprintf("OSLSplit(%v, %v)", out, params[0])
 					}
 				case "delete":
 					if len(params) > 0 {

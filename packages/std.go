@@ -152,7 +152,7 @@ func OSLcastInt(i any) int {
 	}
 }
 
-func OSLsort(arr any) any {
+func OSLsort(arr []any) []any {
 	if arr == nil {
 		return nil
 	}
@@ -164,25 +164,12 @@ func OSLsort(arr any) any {
 		})
 		return v
 
-	case map[string]any:
-		keys := make([]string, 0, len(v))
-		for k := range v {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-
-		sorted := make(map[string]any, len(v))
-		for _, k := range keys {
-			sorted[k] = v[k]
-		}
-		return sorted
-
 	default:
 		panic("OSLsort: invalid type: " + reflect.TypeOf(arr).String())
 	}
 }
 
-func OSLsortBy(arr any, key string) any {
+func OSLsortBy(arr []any, key string) []any {
 	if arr == nil {
 		return nil
 	}
@@ -203,19 +190,6 @@ func OSLsortBy(arr any, key string) any {
 			return OSLcastString(vi) < OSLcastString(vj)
 		})
 		return v
-
-	case map[string]any:
-		keys := make([]string, 0, len(v))
-		for k := range v {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-
-		sorted := make(map[string]any, len(v))
-		for _, k := range keys {
-			sorted[k] = v[k]
-		}
-		return sorted
 
 	default:
 		panic("OSLsortBy: invalid type: " + reflect.TypeOf(arr).String())
@@ -318,6 +292,15 @@ func OSLnullishCoaless(a any, b any) any {
 		return b
 	}
 	return a
+}
+
+func OSLSplit(s string, sep string) []any {
+	split := strings.Split(s, sep)
+	out := make([]any, len(split))
+	for i, v := range split {
+		out[i] = v
+	}
+	return out
 }
 
 func JsonStringify(obj any) string {
