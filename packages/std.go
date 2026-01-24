@@ -157,16 +157,10 @@ func OSLsort(arr []any) []any {
 		return nil
 	}
 
-	switch v := arr.(type) {
-	case []any:
-		sort.Slice(v, func(i, j int) bool {
-			return OSLcastString(v[i]) < OSLcastString(v[j])
-		})
-		return v
-
-	default:
-		panic("OSLsort: invalid type: " + reflect.TypeOf(arr).String())
-	}
+	sort.Slice(arr, func(i, j int) bool {
+		return OSLcastString(arr[i]) < OSLcastString(arr[j])
+	})
+	return arr
 }
 
 func OSLsortBy(arr []any, key string) []any {
@@ -174,26 +168,20 @@ func OSLsortBy(arr []any, key string) []any {
 		return nil
 	}
 
-	switch v := arr.(type) {
-	case []any:
-		sort.Slice(v, func(i, j int) bool {
-			ai, ok1 := v[i].(map[string]any)
-			aj, ok2 := v[j].(map[string]any)
+	sort.Slice(arr, func(i, j int) bool {
+		ai, ok1 := arr[i].(map[string]any)
+		aj, ok2 := arr[j].(map[string]any)
 
-			if !ok1 || !ok2 {
-				return false
-			}
+		if !ok1 || !ok2 {
+			return false
+		}
 
-			vi, _ := ai[key]
-			vj, _ := aj[key]
+		vi, _ := ai[key]
+		vj, _ := aj[key]
 
-			return OSLcastString(vi) < OSLcastString(vj)
-		})
-		return v
-
-	default:
-		panic("OSLsortBy: invalid type: " + reflect.TypeOf(arr).String())
-	}
+		return OSLcastString(vi) < OSLcastString(vj)
+	})
+	return arr
 }
 
 func OSLcastNumber(n any) float64 {
