@@ -152,6 +152,60 @@ func OSLcastInt(i any) int {
 	}
 }
 
+func OSLsort(arr any) any {
+	if arr == nil {
+		return nil
+	}
+
+	switch arr := arr.(type) {
+	case []any:
+		sort.Slice(arr, func(i, j int) bool {
+			return OSLcastString(arr[i]) < OSLcastString(arr[j])
+		})
+		return arr
+	case map[string]any:
+		keys := make([]string, 0, len(arr))
+		for k := range arr {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		sorted := make(map[string]any, len(arr))
+		for _, k := range keys {
+			sorted[k] = arr[k]
+		}
+		return sorted
+	default:
+		panic("OSLsort, invalid type: " + reflect.TypeOf(arr).String())
+	}
+}
+
+func OSLsortBy(arr any, key string) any {
+	if arr == nil {
+		return nil
+	}
+
+	switch arr := arr.(type) {
+	case []any:
+		sort.Slice(arr, func(i, j int) bool {
+			return OSLcastString(arr[i][key]) < OSLcastString(arr[j][key])
+		})
+		return arr
+	case map[string]any:
+		keys := make([]string, 0, len(arr))
+		for k := range arr {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		sorted := make(map[string]any, len(arr))
+		for _, k := range keys {
+			sorted[k] = arr[k]
+		}
+		return sorted
+	default:
+		panic("OSLsortBy, invalid type: " + reflect.TypeOf(arr).String())
+	}
+}
+
 func OSLcastNumber(n any) float64 {
 	if n == nil {
 		return 0

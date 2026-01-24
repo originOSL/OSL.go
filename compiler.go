@@ -875,6 +875,14 @@ func CompileToken(token *Token, ctx VariableContext) string {
 						part.ReturnedType = TYPE_BOOL
 						out = fmt.Sprintf("OSLcontains(%v, %v)", out, params[0])
 					}
+				case "sort":
+					part.ReturnedType = TYPE_ARR
+					out = fmt.Sprintf("OSLsort(%v)", out)
+				case "sortBy":
+					if len(params) > 0 {
+						part.ReturnedType = TYPE_ARR
+						out = fmt.Sprintf("OSLsortBy(%v, %v)", out, params[0])
+					}
 				case "index":
 					if len(params) > 0 {
 						part.ReturnedType = TYPE_NUM
