@@ -382,12 +382,48 @@ func (IMG) Fill(i *OSL_img_Image, r, g, b, a uint8) bool {
 	return true
 }
 
-func RGB(r, g, b uint8) color.RGBA {
-	return color.RGBA{R: r, G: g, B: b, A: 255}
+func RGB(r, g, b uint8) OSL_color.RGBA {
+	return OSL_color.RGBA{R: r, G: g, B: b, A: 255}
 }
 
-func RGBA(r, g, b, a uint8) color.RGBA {
-	return color.RGBA{R: r, G: g, B: b, A: a}
+func RGBA(r, g, b, a uint8) OSL_color.RGBA {
+	return OSL_color.RGBA{R: r, G: g, B: b, A: a}
+}
+
+/* -------------------- saving helpers -------------------- */
+
+func (IMG) SavePNG(i *OSL_img_Image, path string) bool {
+	if i == nil || i.closed || i.im == nil {
+		return false
+	}
+
+	f, err := os.Create(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+
+	return png.Encode(f, i.im) == nil
+}
+
+func (IMG) SaveJPEG(i *OSL_img_Image, path string, quality int) bool {
+	if i == nil || i.closed || i.im == nil {
+		return false
+	}
+
+	if quality < 1 {
+		quality = 1
+	} else if quality > 100 {
+		quality = 100
+	}
+
+	f, err := os.Create(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+
+	return jpeg.Encode(f, i.im, &jpeg.Options{Quality: quality}) == nil
 }
 
 var img = IMG{}
