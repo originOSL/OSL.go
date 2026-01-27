@@ -203,7 +203,7 @@ func (IMG) Resize(i *OSL_img_Image, width, height int) *OSL_img_Image {
 		return nil
 	}
 
-	if width <= 0 || height <= 0 || width > imgMaxDim || height > imgMaxDim {
+	if width <= 0 || height <= 0 {
 		return nil
 	}
 
@@ -216,7 +216,7 @@ func (IMG) ResizeFast(i *OSL_img_Image, width, height int) *OSL_img_Image {
 		return nil
 	}
 
-	if width <= 0 || height <= 0 || width > imgMaxDim || height > imgMaxDim {
+	if width <= 0 || height <= 0 {
 		return nil
 	}
 
