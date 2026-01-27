@@ -1,7 +1,7 @@
 // name: img
 // description: Memory-efficient image utilities following Go idioms
 // author: Mist
-// requires: bytes as OSL_bytes, image as OSL_image, image/png, image/jpeg, golang.org/x/image/draw as OSL_draw, github.com/nfnt/resize as OSL_img_resize, os, io, runtime, github.com/rwcarlsen/goexif/exif as OSL_exif
+// requires: bytes as OSL_bytes, image as OSL_image, image/png, image/jpeg, golang.org/x/image/draw as OSL_draw, github.com/nfnt/resize as OSL_img_resize, os, io, runtime, github.com/rwcarlsen/goexif/exif as OSL_exif, image/color as OSL_color
 
 type IMG struct{}
 
