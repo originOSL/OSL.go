@@ -24,7 +24,9 @@ type VariableContext struct {
 	Locals              map[string]any
 	Prepend             map[string]string
 	Imports             map[string]bool
+	selfTypes           map[string]string
 	ImportOrder         []string
+	selfUsed            bool
 }
 
 func include(path string) string {
@@ -35,29 +37,27 @@ func include(path string) string {
 	return string(data) + "\n"
 }
 
-func mapOSLTypeToGo(oslType string) string {
-	switch oslType {
-	case "string":
-		return "string"
-	case "int":
-		return "int"
-	case "number":
-		return "float64"
-	case "boolean":
-		return "bool"
-	case "object":
-		return "map[string]any"
-	case "array":
-		return "[]any"
-	default:
-		if strings.HasSuffix(oslType, "[]") {
-			return "[]" + mapOSLTypeToGo(strings.TrimSuffix(oslType, "[]"))
-		}
-		return oslType
-	}
+var oslTypes = map[string]string{
+	"string":  "string",
+	"int":     "int",
+	"number":  "float64",
+	"boolean": "bool",
+	"object":  "map[string]any",
+	"array":   "[]any",
 }
 
-func processImports(ctx VariableContext) (compiled string, goImports []string) {
+func mapOSLTypeToGo(oslType string) string {
+	val, ok := oslTypes[oslType]
+	if ok {
+		return val
+	}
+	if before, ok := strings.CutSuffix(oslType, "[]"); ok {
+		return "[]" + mapOSLTypeToGo(before)
+	}
+	return oslType
+}
+
+func processImports(ctx *VariableContext) (compiled string, goImports []string) {
 	var orderedImports []string
 	processed := make(map[string]bool)
 
@@ -141,7 +141,7 @@ func processImports(ctx VariableContext) (compiled string, goImports []string) {
 }
 
 func Compile(ast [][]*Token) string {
-	ctx := VariableContext{
+	ctx := &VariableContext{
 		Globals: make(map[string]any),
 		Locals:  make(map[string]any),
 		Indent:  0,
@@ -161,6 +161,7 @@ func Compile(ast [][]*Token) string {
 			"math":          true,
 			"runtime":       true,
 			"sort":          true,
+			"unsafe":        true,
 		},
 		ImportOrder: []string{
 			"fmt",
@@ -177,10 +178,13 @@ func Compile(ast [][]*Token) string {
 			"math",
 			"runtime",
 			"sort",
+			"unsafe",
 		},
 		DeclaredVars:        make(map[string]bool),
 		VariableTypes:       make(map[string]string),
 		functionReturnTypes: make(map[string]string),
+		selfTypes:           make(map[string]string),
+		selfUsed:            false,
 	}
 
 	mainCompiled := CompileBlock(ast, ctx)
@@ -226,7 +230,7 @@ func Compile(ast [][]*Token) string {
 	return prepend + importsCompiled + mainCompiled
 }
 
-func CompileBlock(block [][]*Token, ctx VariableContext) string {
+func CompileBlock(block [][]*Token, ctx *VariableContext) string {
 	var out string
 	for _, line := range block {
 		out += AddIndent(CompileLine(line, ctx), ctx.Indent*2)
@@ -234,7 +238,7 @@ func CompileBlock(block [][]*Token, ctx VariableContext) string {
 	return out
 }
 
-func CompileLine(line []*Token, ctx VariableContext) string {
+func CompileLine(line []*Token, ctx *VariableContext) string {
 	var out string
 
 	defer func() {
@@ -257,7 +261,7 @@ func CompileLine(line []*Token, ctx VariableContext) string {
 	return out + "\n"
 }
 
-func CompileToken(token *Token, ctx VariableContext) string {
+func CompileToken(token *Token, ctx *VariableContext) string {
 	if token == nil {
 		return ""
 	}
@@ -278,7 +282,7 @@ func CompileToken(token *Token, ctx VariableContext) string {
 
 	switch token.Type {
 	case TKN_ASI:
-		if token.Right.Type == TKN_FNC && token.Left.Type == TKN_VAR && token.Right.Data == "function" {
+		if token.Right.Type == TKN_FNC && token.Left.Type == TKN_VAR && token.Right.Data == "function" && ctx.Indent == 0 {
 			ctx.Indent++
 			params_string := ""
 			if len(token.Right.Parameters) > 0 {
@@ -309,6 +313,10 @@ func CompileToken(token *Token, ctx VariableContext) string {
 			if len(token.Right.Parameters) > 1 && token.Right.Parameters[1] != nil {
 				if blockData, ok := token.Right.Parameters[1].Data.([][]*Token); ok {
 					funcBody = CompileBlock(blockData, ctx)
+					if ctx.selfUsed {
+						params_string = "OSLself any, " + params_string
+						ctx.selfUsed = false
+					}
 				}
 			}
 
@@ -353,27 +361,42 @@ func CompileToken(token *Token, ctx VariableContext) string {
 		}
 		if token.Left.Type == TKN_RMT {
 			var objPath string
-			if len(token.Left.ObjPath) > 0 {
-				objPath = CompileToken(token.Left.ObjPath[0], ctx)
+			path := token.Left.ObjPath
+			if len(path) > 0 {
+				tkn := &Token{
+					Type: TKN_MTD,
+					Data: path[0 : len(path)-1],
+				}
+				objPath = CompileToken(tkn, ctx)
 			} else {
 				objPath = "nil"
 			}
-			var keyExpr string
+			var keyExpr *Token
 			if token.Left.Final != nil && token.Left.Final.Type == TKN_MTV {
 				if methodName, ok := token.Left.Final.Data.(string); ok && methodName == "item" {
 					if len(token.Left.Final.Parameters) > 0 {
-						keyExpr = CompileToken(token.Left.Final.Parameters[0], ctx)
+						keyExpr = token.Left.Final.Parameters[0]
 					} else {
-						keyExpr = CompileToken(token.Left.Final, ctx)
+						keyExpr = token.Left.Final
 					}
 				} else {
-					keyExpr = CompileToken(token.Left.Final, ctx)
+					keyExpr = token.Left.Final
 				}
 			} else {
-				keyExpr = JsonStringify(CompileToken(token.Left.Final, ctx))
+				keyExpr = token.Left.Final
 			}
 
-			return fmt.Sprintf("OSLsetItem(%v, %v, %v)", objPath, keyExpr, compiledRight)
+			keyStr := CompileToken(keyExpr, ctx)
+
+			typeStr, hasType := oslTypes[objPath]
+			if ctx.Indent == 0 && hasType && keyExpr.Type == TKN_VAR && token.Right.Type == TKN_FNC && token.Right.Data == "function" {
+				funcPart := strings.TrimPrefix(strings.TrimSuffix(compiledRight, ")"), "(func")
+				return fmt.Sprintf("func (OSLself %v) %v%v", typeStr, keyExpr.Data, funcPart)
+			} else if keyExpr.Type == TKN_VAR {
+				keyStr = JsonStringify(keyStr)
+			}
+
+			return fmt.Sprintf("OSLsetItem(%v, %v, %v)", objPath, keyStr, compiledRight)
 		}
 
 		if varName != "" {
@@ -558,6 +581,9 @@ func CompileToken(token *Token, ctx VariableContext) string {
 			panic("Cannot use reserved variable name: " + varName)
 		}
 		switch varName {
+		case "self":
+			ctx.selfUsed = true
+			return "OSLself"
 		case "null":
 			return "nil"
 		case "timestamp":
@@ -598,7 +624,7 @@ func CompileToken(token *Token, ctx VariableContext) string {
 		obj := CompileObject(token.Data.([][]*Token), ctx)
 		ctx.Indent--
 		token.ReturnedType = TYPE_OBJ
-		return AddIndent(obj, 1)
+		return obj
 	case TKN_RMT:
 		var path []*Token
 		if token.Data != nil {
@@ -640,7 +666,6 @@ func CompileToken(token *Token, ctx VariableContext) string {
 		}
 		switch token.Data {
 		case "function":
-			ctx.Indent++
 			var paramString strings.Builder
 			if len(params) > 0 {
 				args := strings.Split(params[0].Data.(string), ",")
@@ -668,12 +693,22 @@ func CompileToken(token *Token, ctx VariableContext) string {
 			if len(params) > 1 {
 				blk := params[1]
 				if blk != nil {
-					out += CompileBlock(blk.Data.([][]*Token), ctx)
+					inner := CompileBlock(blk.Data.([][]*Token), ctx)
+					if ctx.selfUsed {
+						inner = AddIndent("OSLself := OSLself\n", ctx.Indent*2) + inner
+						ctx.selfUsed = false
+					}
+					out += inner
 				}
 			}
 			out += AddIndent("})", (ctx.Indent-2)*2)
 			ctx.Indent--
 			return out
+		case "worker":
+			if len(token.Parameters) > 0 {
+				return fmt.Sprintf("OSLworker(%v)", CompileToken(token.Parameters[0], ctx))
+			}
+			panic("worker osl function needs 1 parameter")
 		case "typeof":
 			if len(token.Parameters) > 0 {
 				token.ReturnedType = TYPE_STR
@@ -714,6 +749,11 @@ func CompileToken(token *Token, ctx VariableContext) string {
 				return fmt.Sprintf("%v", token.Parameters[0].Data)
 			}
 		default:
+			nameStr := token.Data.(string)
+			_, ok := oslTypes[nameStr]
+			if ok {
+				return "OSL_new_" + nameStr + "()"
+			}
 			var paramString strings.Builder
 			if len(token.Parameters) > 0 {
 				for i, p := range params {
@@ -775,6 +815,14 @@ func CompileToken(token *Token, ctx VariableContext) string {
 					part.ReturnedType = TYPE_INT
 					out = fmt.Sprintf("OSLlen(%v)", out)
 				default:
+					if previous.Type == TKN_VAR && previous.Data.(string) == "self" {
+						typeStr, hasType := ctx.selfTypes[name]
+						if hasType {
+							out = fmt.Sprintf("%v.%v", out, name)
+							part.ReturnedType = typeStr
+							break
+						}
+					}
 					if previous.ReturnedType == TYPE_OBJ {
 						out = fmt.Sprintf("%v[OSLcastString(%v)]", out, name)
 					}
@@ -787,7 +835,7 @@ func CompileToken(token *Token, ctx VariableContext) string {
 				}
 				switch name {
 				case "call":
-					out = fmt.Sprintf("%v(%v)", out, strings.Join(params, ", "))
+					out = fmt.Sprintf("OSLcallFunc(%v.%v, %v)", out, part.Parameters[0].Data, JsonStringify(params[1:]))
 				case "toStr":
 					part.ReturnedType = TYPE_STR
 					out = fmt.Sprintf("OSLcastString(%v)", out)
@@ -993,7 +1041,7 @@ func CompileToken(token *Token, ctx VariableContext) string {
 	return fmt.Sprintf("<%v>", token.Type)
 }
 
-func CompileCmd(cmd []*Token, ctx VariableContext) string {
+func CompileCmd(cmd []*Token, ctx *VariableContext) string {
 	var out string
 	switch cmd[0].Data {
 	case "//":
@@ -1106,7 +1154,7 @@ func CompileCmd(cmd []*Token, ctx VariableContext) string {
 		if len(cmd) < 2 {
 			panic("Log command requires at least 1 parameter")
 		}
-		out = "fmt.Println("
+		out = "OSLlogValues("
 		for i, param := range cmd {
 			if i == 0 {
 				continue
@@ -1117,6 +1165,66 @@ func CompileCmd(cmd []*Token, ctx VariableContext) string {
 			}
 		}
 		out += ")"
+	case "type":
+		name := cmd[1].Data.(string)
+		oslTypes[name] = "*OSL_" + name
+		switch cmd[2].Type {
+		case TKN_VAR:
+			typeStr := cmd[2].Data.(string)
+			out += "type OSL_" + name + " " + mapOSLTypeToGo(typeStr) + "\n"
+		case TKN_BLK:
+			defaults := make(map[string]*Token)
+			inlines := make(map[string]*Token)
+			out += "type OSL_" + cmd[1].Data.(string) + " struct {\n"
+			selfTypes := make(map[string]string)
+			ctx.Indent++
+			for _, line := range cmd[2].Data.([][]*Token) {
+				switch line[0].Type {
+				case TKN_ASI:
+					val := line[0]
+					varName := val.Left.Data.(string)
+					if val.Right.Type == TKN_FNC && val.Right.Data == "function" {
+						inlines[varName] = val.Right
+						params := val.Right.Parameters[0].Data.(string)
+						parts := strings.Split(params, ",")
+						paramStr := make([]string, len(parts))
+						for i, part := range parts {
+							parts[i] = strings.TrimSpace(part)
+							if parts[i] == "" {
+								continue
+							}
+							paramStr[i] = mapOSLTypeToGo(strings.Split(parts[i], " ")[1])
+						}
+						val.SetType = "func(" + strings.Join(paramStr, ", ") + ") " + val.Right.Returns
+					} else {
+						defaults[varName] = val.Right
+					}
+					if val.SetType == "" {
+						val.SetType = "any"
+					}
+					typeStr := mapOSLTypeToGo(val.SetType)
+					selfTypes[varName] = typeStr
+					out += AddIndent(fmt.Sprintf("%v %v\n", varName, typeStr), ctx.Indent*2)
+				}
+			}
+			ctx.selfTypes = selfTypes
+			ctx.Indent--
+			out += "}\nfunc OSL_new_" + name + "() *OSL_" + name + " {\n"
+			ctx.Indent++
+			out += AddIndent("var OSLself = &OSL_"+name+"{\n", ctx.Indent*2)
+			ctx.Indent++
+			for varName, val := range defaults {
+				out += AddIndent(fmt.Sprintf("%v: %v,\n", varName, CompileToken(val, ctx)), ctx.Indent*2)
+			}
+			ctx.Indent--
+			out += AddIndent("}\n", ctx.Indent*2)
+			for varName, val := range inlines {
+				out += AddIndent(fmt.Sprintf("OSLself.%v = %v\n", varName, CompileToken(val, ctx)), ctx.Indent*2)
+			}
+			out += AddIndent("return OSLself\n", ctx.Indent*2)
+			ctx.Indent--
+			out += "}\n"
+		}
 	case "return":
 		if len(cmd) < 2 {
 			out += "return"
@@ -1200,7 +1308,7 @@ func CompileCmd(cmd []*Token, ctx VariableContext) string {
 	return out + "\n"
 }
 
-func CompileObject(obj [][]*Token, ctx VariableContext) string {
+func CompileObject(obj [][]*Token, ctx *VariableContext) string {
 	var out strings.Builder
 	out.WriteString("map[string]any{\n")
 	for _, token := range obj {
@@ -1224,7 +1332,7 @@ func CompileObject(obj [][]*Token, ctx VariableContext) string {
 	return out.String() + AddIndent("}", (ctx.Indent-1)*2)
 }
 
-func CompileArray(arr []*Token, ctx VariableContext) string {
+func CompileArray(arr []*Token, ctx *VariableContext) string {
 	if len(arr) == 0 {
 		return "[]any{}"
 	}

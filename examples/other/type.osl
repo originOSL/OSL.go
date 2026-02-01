@@ -1,0 +1,15 @@
+type test (
+  def lol() string (
+    return "absolute rotur"
+  )
+)
+
+def main() (
+  test lmao = test()
+
+  lmao.lol = def() string -> (
+    return "absolute rotur2"
+  )
+  
+  log lmao.lol()
+)

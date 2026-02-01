@@ -152,6 +152,137 @@ func OSLcastInt(i any) int {
 	}
 }
 
+func OSLlogValues(values ...any) {
+	for _, v := range values {
+		OSLlog(v)
+	}
+}
+
+func OSLlog(v any) {
+	if v == nil {
+		fmt.Println("null")
+	}
+	switch v := v.(type) {
+	case map[string]any:
+		fmt.Println(JsonStringify(v))
+		return
+	case []any:
+		fmt.Println(JsonStringify(v))
+		return
+	case string, int, float64, bool:
+		fmt.Println(v)
+		return
+	}
+
+	rv := reflect.ValueOf(v)
+	if rv.Kind() == reflect.Ptr {
+		if rv.IsNil() {
+			fmt.Println("null")
+			return
+		}
+		rv = rv.Elem()
+	}
+
+	if rv.Kind() == reflect.Slice || rv.Kind() == reflect.Array {
+		fmt.Println(JsonStringify(OSLcastArray(v)))
+		return
+	}
+
+	if rv.Kind() == reflect.Map {
+		fmt.Println(JsonStringify(OSLcastObject(v)))
+		return
+	}
+
+	fmt.Println(v)
+}
+
+func OSLisFunc(v any) bool {
+	if v == nil {
+		return false
+	}
+	return reflect.TypeOf(v).Kind() == reflect.Func
+}
+
+func OSLcallFunc(fn any, self any, params []any) any {
+	if fn == nil {
+		return nil
+	}
+
+	if params == nil {
+		params = []any{}
+	}
+
+	if self != nil {
+		params = append([]any{self}, params...)
+	}
+
+	rv := reflect.ValueOf(fn)
+	if rv.Kind() != reflect.Func {
+		panic("OSLcallFunc: invalid type: " + reflect.TypeOf(fn).String())
+	}
+
+	ft := rv.Type()
+	numIn := ft.NumIn()
+
+	isVariadic := ft.IsVariadic()
+
+	args := make([]reflect.Value, 0, len(params))
+
+	for i := range params {
+		var pt reflect.Type
+
+		if isVariadic && i >= numIn-1 {
+			pt = ft.In(numIn - 1).Elem()
+		} else {
+			pt = ft.In(i)
+		}
+
+		var av reflect.Value
+
+		if params[i] == nil {
+			switch pt.Kind() {
+			case reflect.Interface, reflect.Pointer, reflect.Map,
+				reflect.Slice, reflect.Func, reflect.Chan:
+				av = reflect.Zero(pt)
+			default:
+				panic("OSLcallFunc: nil is not assignable to " + pt.String())
+			}
+		} else {
+			av = reflect.ValueOf(params[i])
+
+			at := av.Type()
+
+			if at.AssignableTo(pt) {
+			} else if at.ConvertibleTo(pt) {
+				av = av.Convert(pt)
+			} else if pt.Kind() == reflect.Interface && at.Implements(pt) {
+			} else {
+				panic(
+					"OSLcallFunc: cannot use " + at.String() +
+						" as " + pt.String(),
+				)
+			}
+		}
+
+		args = append(args, av)
+	}
+
+	out := rv.Call(args)
+
+	switch len(out) {
+	case 0:
+		return nil
+	case 1:
+		return out[0].Interface()
+	default:
+		res := make([]any, len(out))
+		for i := range out {
+			res[i] = out[i].Interface()
+		}
+		return res
+	}
+}
+
 func OSLsort(arr []any) []any {
 	if arr == nil {
 		return nil
@@ -736,29 +867,51 @@ func OSLsetItem(a any, b any, value any) bool {
 
 	case reflect.Struct:
 		field := v.FieldByName(key)
-		if field.IsValid() && field.CanSet() {
-			val := reflect.ValueOf(value)
-			if val.Type().AssignableTo(field.Type()) {
-				field.Set(val)
-				return true
-			}
+		if !field.IsValid() {
+			return false
 		}
-		return false
+
+		var val reflect.Value
+		if value == nil {
+			val = reflect.Zero(field.Type())
+		} else {
+			val = reflect.ValueOf(value)
+		}
+
+		return setFieldUnsafe(field, val)
 	}
 
 	return false
 }
 
+func setFieldUnsafe(field reflect.Value, val reflect.Value) bool {
+	if !field.CanAddr() {
+		return false
+	}
+
+	if !val.Type().AssignableTo(field.Type()) {
+		if val.Type().ConvertibleTo(field.Type()) {
+			val = val.Convert(field.Type())
+		} else {
+			return false
+		}
+	}
+
+	ptr := unsafe.Pointer(field.UnsafeAddr())
+	reflect.NewAt(field.Type(), ptr).Elem().Set(val)
+	return true
+}
+
 func OSLarrayJoin(a any, b any) string {
-	var out string
+	var out strings.Builder
 	sep := OSLcastString(b)
 	arr := OSLcastArray(a)
 
 	for _, v := range arr {
-		out += OSLcastString(v) + sep
+		out.WriteString(OSLcastString(v) + sep)
 	}
 
-	return strings.TrimSuffix(out, sep)
+	return strings.TrimSuffix(out.String(), sep)
 }
 
 func OSLgetKeys(a any) []any {
@@ -773,10 +926,8 @@ func OSLgetKeys(a any) []any {
 		return keys
 	case []any:
 		keys := make([]any, len(a))
-		i := 0
-		for _, v := range a {
-			keys[i] = OSLcastString(v)
-			i++
+		for i := range a {
+			keys[i] = i
 		}
 		return keys
 	default:
@@ -872,3 +1023,34 @@ func OSLclone(a any) any {
 		return a
 	}
 }
+
+// worker handling
+
+var OSLself any = nil
+
+func OSLworker(props map[string]any) map[string]any {
+	props["createdTime"] = time.Now()
+	props["processTime"] = 0
+	props["alive"] = true
+	props["kill"] = func() {
+		props["alive"] = false
+	}
+	go (func() {
+		OSLself = props
+		OSLcallFunc(props["oncreate"], props, nil)
+		for {
+			startTime := time.Now()
+			OSLself = props
+			OSLcallFunc(props["onframe"], props, nil)
+			props["processTime"] = OSLcastNumber(props["processTime"]) + time.Since(startTime).Seconds()
+			if props["alive"] != true {
+				props["alive"] = false
+				OSLself = props
+				OSLcallFunc(props["onkill"], props, nil)
+				break
+			}
+		}
+	})()
+	return props
+}
+
