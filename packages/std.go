@@ -294,11 +294,19 @@ func OSLsort(arr []any) []any {
 	return arr
 }
 
-func OSLsortBy(arr []any, key string) []any {
+func OSLsortBy(arr []any, key any) []any {
 	if arr == nil {
 		return nil
 	}
 
+	if OSLisFunc(key) {
+		sort.Slice(arr, func(i, j int) bool {
+			return OSLcastBool(OSLcallFunc(key, []any{arr[i], arr[j]}))
+		})
+		return arr
+	}
+
+	keyStr := OSLcastString(key)
 	sort.Slice(arr, func(i, j int) bool {
 		ai, ok1 := arr[i].(map[string]any)
 		aj, ok2 := arr[j].(map[string]any)
@@ -307,8 +315,8 @@ func OSLsortBy(arr []any, key string) []any {
 			return false
 		}
 
-		vi, _ := ai[key]
-		vj, _ := aj[key]
+		vi, _ := ai[keyStr]
+		vj, _ := aj[keyStr]
 
 		return OSLcastString(vi) < OSLcastString(vj)
 	})
