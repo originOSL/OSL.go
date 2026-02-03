@@ -142,7 +142,7 @@ func NewOSLUtils() *OSLUtils {
 		comparisons: []string{"!=", "==", "!==", "===", ">", "<", "!>", "!<", ">=", "<=", "in", "notIn"},
 		logic:       []string{"and", "or", "nor", "xor", "xnor", "nand"},
 		bitwise:     []string{"|", "&", "<<", ">>", "^^"},
-		unary:       []string{"typeof", "new"},
+		unary:       []string{"!", "-"},
 
 		inlinableFunctions:  make(map[string]any),
 		functionReturnTypes: make(map[string]FunctionSignature),
@@ -1357,6 +1357,7 @@ func (utils *OSLUtils) GenerateFullAST(code string, main bool) [][]*Token {
 	}
 
 	// Apply regex transformations
+	re := regexp.MustCompile(`\n\s*\.`)
 	code, err := utils.fullASTRegex.ReplaceFunc(code, func(m regexp2.Match) string {
 		match := m.String()
 		if strings.HasPrefix(strings.TrimSpace(match), "//") {
@@ -1384,7 +1385,7 @@ func (utils *OSLUtils) GenerateFullAST(code string, main bool) [][]*Token {
 		}
 		if strings.HasPrefix(match, "\n") {
 			line++
-			return strings.ReplaceAll(match, "\n ", ".")
+			return re.ReplaceAllString(match, ".")
 		}
 		return match
 	}, -1, -1)

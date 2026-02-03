@@ -231,11 +231,11 @@ func Compile(ast [][]*Token) string {
 }
 
 func CompileBlock(block [][]*Token, ctx *VariableContext) string {
-	var out string
+	var out strings.Builder
 	for _, line := range block {
-		out += AddIndent(CompileLine(line, ctx), ctx.Indent*2)
+		out.WriteString(AddIndent(CompileLine(line, ctx), ctx.Indent*2))
 	}
-	return out
+	return out.String()
 }
 
 func CompileLine(line []*Token, ctx *VariableContext) string {
@@ -617,10 +617,10 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 		token.ReturnedType = TYPE_ARR
 		return arr
 	case TKN_OBJ:
-		ctx.Indent++
 		if token.Data == nil {
 			return "map[string]any{}"
 		}
+		ctx.Indent++
 		obj := CompileObject(token.Data.([][]*Token), ctx)
 		ctx.Indent--
 		token.ReturnedType = TYPE_OBJ
@@ -701,7 +701,7 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 					out += inner
 				}
 			}
-			out += AddIndent("})", (ctx.Indent-2)*2)
+			out += AddIndent("})", ctx.Indent*2-2)
 			ctx.Indent--
 			return out
 		case "worker":

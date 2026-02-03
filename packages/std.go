@@ -301,8 +301,8 @@ func OSLsortBy(arr []any, key any) []any {
 
 	if OSLisFunc(key) {
 		sort.Slice(arr, func(i, j int) bool {
-			ki := OSLcallFunc(key, []any{arr[i]})
-			kj := OSLcallFunc(key, []any{arr[j]})
+			ki := OSLcallFunc(key, nil, []any{arr[i]})
+			kj := OSLcallFunc(key, nil, []any{arr[j]})
 
 			return OSLless(ki, kj)
 		})
