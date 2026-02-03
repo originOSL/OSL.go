@@ -301,7 +301,10 @@ func OSLsortBy(arr []any, key any) []any {
 
 	if OSLisFunc(key) {
 		sort.Slice(arr, func(i, j int) bool {
-			return OSLcastBool(OSLcallFunc(key, []any{arr[i], arr[j]}))
+			ki := OSLcallFunc(key, []any{arr[i]})
+			kj := OSLcallFunc(key, []any{arr[j]})
+
+			return OSLless(ki, kj)
 		})
 		return arr
 	}
@@ -315,12 +318,27 @@ func OSLsortBy(arr []any, key any) []any {
 			return false
 		}
 
-		vi, _ := ai[keyStr]
-		vj, _ := aj[keyStr]
+		ki := ai[keyStr]
+		kj := aj[keyStr]
 
-		return OSLcastString(vi) < OSLcastString(vj)
+		return OSLless(ki, kj)
 	})
+
 	return arr
+}
+
+func OSLless(a any, b any) bool {
+	if a == b {
+		return false
+	}
+	return OSLcastString(a) < OSLcastString(b)
+}
+
+func OSLgreater(a any, b any) bool {
+	if a == b {
+		return false
+	}
+	return OSLcastString(a) > OSLcastString(b)
 }
 
 func OSLcastNumber(n any) float64 {
