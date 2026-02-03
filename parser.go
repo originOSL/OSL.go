@@ -945,7 +945,7 @@ func (utils *OSLUtils) evalASTNode(node *Token) *Token {
 		if right.Type != TKN_BLK {
 			right = &Token{
 				Type:   TKN_BLK,
-				Data:   [][]*Token{{right}},
+				Data:   [][]*Token{{&Token{Type: TKN_CMD, Data: "return", Source: right.Source}, right}},
 				Source: fmt.Sprintf("(\nreturn %s\n)", right.Source),
 			}
 		}
