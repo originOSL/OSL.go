@@ -372,6 +372,7 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 				objPath = "nil"
 			}
 			var keyExpr *Token
+			isRaw := false
 			if token.Left.Final != nil && token.Left.Final.Type == TKN_MTV {
 				if methodName, ok := token.Left.Final.Data.(string); ok && methodName == "item" {
 					if len(token.Left.Final.Parameters) > 0 {
@@ -383,6 +384,7 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 					keyExpr = token.Left.Final
 				}
 			} else {
+				isRaw = true
 				keyExpr = token.Left.Final
 			}
 
@@ -392,7 +394,7 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 			if ctx.Indent == 0 && hasType && keyExpr.Type == TKN_VAR && token.Right.Type == TKN_FNC && token.Right.Data == "function" {
 				funcPart := strings.TrimPrefix(strings.TrimSuffix(compiledRight, ")"), "(func")
 				return fmt.Sprintf("func (OSLself %v) %v%v", typeStr, keyExpr.Data, funcPart)
-			} else if keyExpr.Type == TKN_VAR {
+			} else if isRaw {
 				keyStr = JsonStringify(keyStr)
 			}
 
