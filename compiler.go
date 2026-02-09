@@ -446,6 +446,9 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 						compiledRight = fmt.Sprintf("OSLcastObject(%v)", compiledRight)
 					}
 				}
+				if goType == "auto" && op == "=" {
+					return fmt.Sprintf("var %v %v %v", varName, op, compiledRight)
+				}
 				return fmt.Sprintf("var %v %v %v %v", varName, goType, op, compiledRight)
 			}
 			if !declared {
@@ -1239,6 +1242,20 @@ func CompileCmd(cmd []*Token, ctx *VariableContext) string {
 		if len(cmd) == 2 {
 			out += "OSLwait(" + CompileToken(cmd[1], ctx) + ")"
 		}
+	case "switch":
+		if len(cmd) < 3 {
+			panic("Switch command requires at least 2 parameters")
+		}
+		out += "switch " + CompileToken(cmd[1], ctx) + " {\n"
+		ctx.Indent++
+		out += CompileBlock(cmd[2].Data.([][]*Token), ctx)
+		ctx.Indent--
+		out += AddIndent("}\n", ctx.Indent*2)
+	case "case":
+		if len(cmd) < 2 {
+			panic("Case command requires at least 1 parameter")
+		}
+		out += "case " + CompileToken(cmd[1], ctx) + ":\n"
 	case "import":
 		if len(cmd) < 2 {
 			panic("Import command requires at least 1 parameter")
