@@ -191,11 +191,16 @@ func (s *Server) Stop() error {
 
 // Connection methods (shared by client and server)
 
-func (c *Connection) Send(message string) {
-	select {
-	case c.send <- []byte(message):
+func (c *Connection) Send(message any) {
+	switch v := message.(type) {
+	case string:
+		c.send <- []byte(v)
+	case map[string]any:
+		c.send <- []byte(JsonStringify(v))
+	case []any:
+		c.send <- []byte(JsonStringify(v))
 	default:
-		log.Println("Send channel full, dropping message")
+		panic("Invalid message type: " + reflect.TypeOf(message).String())
 	}
 }
 
