@@ -9,6 +9,9 @@ type Connection struct {
 	send      chan []byte
 	closeOnce sync.Once
 
+	dataMutex sync.RWMutex
+	data      map[string]any
+
 	onMessage func(string)
 	onClose   func()
 }
@@ -33,6 +36,7 @@ func (WS) Connect(url string, protocols ...string) *Connection {
 	c := &Connection{
 		url:  url,
 		conn: conn,
+		data: map[string]any{},
 		send: make(chan []byte, 10),
 	}
 
@@ -90,6 +94,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	c := &Connection{
 		url:  r.RemoteAddr,
 		conn: conn,
+		data: map[string]any{},
 		send: make(chan []byte, 10),
 	}
 
@@ -213,6 +218,38 @@ func (c *Connection) Close() {
 			c.onClose()
 		}
 	})
+}
+
+func (c *Connection) Set(key string, value any) {
+	c.dataMutex.Lock()
+	defer c.dataMutex.Unlock()
+	c.data[key] = value
+}
+
+func (c *Connection) Get(key string) any {
+	c.dataMutex.RLock()
+	defer c.dataMutex.RUnlock()
+	val, ok := c.data[key]
+	if !ok {
+		return nil
+	}
+	return val
+}
+
+func (c *Connection) Delete(key string) {
+	c.dataMutex.Lock()
+	defer c.dataMutex.Unlock()
+	delete(c.data, key)
+}
+
+func (c *Connection) GetAll() map[string]any {
+	c.dataMutex.RLock()
+	defer c.dataMutex.RUnlock()
+	copy := make(map[string]any, len(c.data))
+	for k, v := range c.data {
+		copy[k] = v
+	}
+	return copy
 }
 
 func (c *Connection) OnMessage(handler func(string)) {
