@@ -1,7 +1,7 @@
 // name: ws
 // description: websocket package for osl
 // author: Mist
-// requires: github.com/gorilla/websocket, crypto/tls, log, sync
+// requires: github.com/gorilla/websocket, crypto/tls, log, sync, net/http
 
 type Connection struct {
 	url       string
@@ -41,6 +41,155 @@ func (WS) Connect(url string, protocols ...string) *Connection {
 
 	return c
 }
+
+type Server struct {
+	addr        string
+	path        string
+	upgrader    websocket.Upgrader
+	connections map[*Connection]bool
+	connMutex   sync.RWMutex
+	server      *http.Server
+
+	onConnect    func(*Connection)
+	onMessage    func(*Connection, string)
+	onDisconnect func(*Connection)
+}
+
+func (WS) NewServer(addr, path string) *Server {
+	return &Server{
+		addr:        addr,
+		path:        path,
+		connections: make(map[*Connection]bool),
+		upgrader: websocket.Upgrader{
+			CheckOrigin: func(r *http.Request) bool {
+				return true
+			},
+		},
+	}
+}
+
+func (s *Server) OnConnect(handler func(*Connection)) {
+	s.onConnect = handler
+}
+
+func (s *Server) OnMessage(handler func(*Connection, string)) {
+	s.onMessage = handler
+}
+
+func (s *Server) OnDisconnect(handler func(*Connection)) {
+	s.onDisconnect = handler
+}
+
+func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
+	conn, err := s.upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Println("upgrade error:", err)
+		return
+	}
+
+	c := &Connection{
+		url:  r.RemoteAddr,
+		conn: conn,
+		send: make(chan []byte, 10),
+	}
+
+	c.onMessage = func(msg string) {
+		if s.onMessage != nil {
+			s.onMessage(c, msg)
+		}
+	}
+
+	c.onClose = func() {
+		s.removeConnection(c)
+		if s.onDisconnect != nil {
+			s.onDisconnect(c)
+		}
+	}
+
+	s.addConnection(c)
+
+	if s.onConnect != nil {
+		s.onConnect(c)
+	}
+
+	go c.readLoop()
+	go c.writeLoop()
+}
+
+func (s *Server) addConnection(c *Connection) {
+	s.connMutex.Lock()
+	defer s.connMutex.Unlock()
+	s.connections[c] = true
+}
+
+func (s *Server) removeConnection(c *Connection) {
+	s.connMutex.Lock()
+	defer s.connMutex.Unlock()
+	delete(s.connections, c)
+}
+
+func (s *Server) Broadcast(message string) {
+	s.connMutex.RLock()
+	defer s.connMutex.RUnlock()
+
+	for conn := range s.connections {
+		conn.Send(message)
+	}
+}
+
+func (s *Server) GetConnections() []*Connection {
+	s.connMutex.RLock()
+	defer s.connMutex.RUnlock()
+
+	conns := make([]*Connection, 0, len(s.connections))
+	for conn := range s.connections {
+		conns = append(conns, conn)
+	}
+	return conns
+}
+
+func (s *Server) Start() error {
+	mux := http.NewServeMux()
+	mux.HandleFunc(s.path, s.handleWebSocket)
+
+	s.server = &http.Server{
+		Addr:    s.addr,
+		Handler: mux,
+	}
+
+	log.Printf("WebSocket server starting on %s%s", s.addr, s.path)
+	return s.server.ListenAndServe()
+}
+
+func (s *Server) StartTLS(certFile, keyFile string) error {
+	mux := http.NewServeMux()
+	mux.HandleFunc(s.path, s.handleWebSocket)
+
+	s.server = &http.Server{
+		Addr:    s.addr,
+		Handler: mux,
+	}
+
+	log.Printf("WebSocket server (TLS) starting on %s%s", s.addr, s.path)
+	return s.server.ListenAndServeTLS(certFile, keyFile)
+}
+
+func (s *Server) Stop() error {
+	if s.server == nil {
+		return nil
+	}
+
+	// Close all connections
+	s.connMutex.Lock()
+	for conn := range s.connections {
+		conn.Close()
+	}
+	s.connMutex.Unlock()
+
+	return s.server.Close()
+}
+
+// Connection methods (shared by client and server)
 
 func (c *Connection) Send(message string) {
 	select {

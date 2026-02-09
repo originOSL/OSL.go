@@ -669,6 +669,10 @@ func OSLtrim(s any, from int, to int) string {
 	return string(str[start:end])
 }
 
+func OSLwait(seconds float64) {
+	time.Sleep(time.Duration(seconds) * time.Second)
+}
+
 func OSLslice(s any, start int, end int) []any {
 	arr := OSLcastArray(s)
 	n := len(arr)

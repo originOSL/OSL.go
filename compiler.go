@@ -1235,6 +1235,10 @@ func CompileCmd(cmd []*Token, ctx *VariableContext) string {
 		if len(cmd) > 1 {
 			out += fmt.Sprintf("return %v", CompileToken(cmd[1], ctx))
 		}
+	case "wait":
+		if len(cmd) == 2 {
+			out += "OSLwait(" + CompileToken(cmd[1], ctx) + ")"
+		}
 	case "import":
 		if len(cmd) < 2 {
 			panic("Import command requires at least 1 parameter")
