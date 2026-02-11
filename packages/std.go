@@ -743,12 +743,12 @@ func OSLKeyIn(b any, a any) bool {
 		return false
 	}
 
+	key := OSLcastString(b)
 	if sm, ok := a.(*SafeMap[string, any]); ok {
 		_, exists := sm.Get(key)
 		return exists
 	}
 
-	key := OSLcastString(b)
 	switch a := a.(type) {
 	case map[string]any:
 		_, ok := a[key]

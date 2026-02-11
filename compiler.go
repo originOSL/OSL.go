@@ -162,6 +162,7 @@ func Compile(ast [][]*Token) string {
 			"runtime":       true,
 			"sort":          true,
 			"unsafe":        true,
+			"sync":          true,
 		},
 		ImportOrder: []string{
 			"fmt",
@@ -179,6 +180,7 @@ func Compile(ast [][]*Token) string {
 			"runtime",
 			"sort",
 			"unsafe",
+			"sync",
 		},
 		DeclaredVars:        make(map[string]bool),
 		VariableTypes:       make(map[string]string),
