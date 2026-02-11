@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	"github.com/pkg/browser"
 )
@@ -247,7 +248,7 @@ func compile(main_args []string, max bool) {
 			outputPath = filepath.Join(cwd, customOutput)
 		}
 	} else {
-		outputName := inputFile
+		outputName := strings.TrimSuffix(filepath.Base(inputFile), ".osl")
 		outputPath = filepath.Join(cwd, outputName)
 	}
 
