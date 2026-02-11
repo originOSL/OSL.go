@@ -7,7 +7,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strings"
 
 	"github.com/pkg/browser"
 )
@@ -24,16 +23,16 @@ Usage:
   osl <command> [options]
 
 Commands:
-  setup                  Setup OSL.go environment
-  compile <file.osl>     Compile OSL file
-  compile-max <file.osl> Compile OSL file with maximum optimizations
-  transpile <file.osl>   Transpile OSL file to Go and print to stdout
-  run <file.osl>         Compile and run OSL file
-  ast <file.osl>         Generate AST for OSL file
-  uninstall              Uninstall OSL.go
-  origin                 Open Origin website (https://origin.mistium.com)
-  help                   Show this help message
-  version                Show version information
+  setup                      Setup OSL.go environment
+  compile <file.osl> [-o <output>]     Compile OSL file
+  compile-max <file.osl> [-o <output>] Compile OSL file with maximum optimizations
+  transpile <file.osl>       Transpile OSL file to Go and print to stdout
+  run <file.osl>             Compile and run OSL file
+  ast <file.osl>             Generate AST for OSL file
+  uninstall                  Uninstall OSL.go
+  origin                     Open Origin website (https://origin.mistium.com)
+  help                       Show this help message
+  version                    Show version information
 
 For more information, visit: https://origin.mistium.com`
 )
@@ -170,12 +169,32 @@ func transpile(args []string) {
 }
 
 func compile(main_args []string, max bool) {
-	if len(main_args) != 1 {
-		fmt.Println("Usage: osl compile <file.osl>")
+	if len(main_args) < 1 {
+		fmt.Println("Usage: osl compile <file.osl> [-o <output>]")
 		return
 	}
 
-	inputFile := main_args[0]
+	inputFile := ""
+	customOutput := ""
+
+	for i := 0; i < len(main_args); i++ {
+		if main_args[i] == "-o" {
+			if i+1 < len(main_args) {
+				customOutput = main_args[i+1]
+				i++
+			} else {
+				fmt.Println("Error: -o flag requires an output filename")
+				return
+			}
+		} else if inputFile == "" {
+			inputFile = main_args[i]
+		}
+	}
+
+	if inputFile == "" {
+		fmt.Println("Usage: osl compile <file.osl> [-o <output>]")
+		return
+	}
 
 	scriptDir := filepath.Dir(inputFile)
 	originalDir, err := os.Getwd()
@@ -220,8 +239,17 @@ func compile(main_args []string, max bool) {
 		fmt.Println("Warning: failed to copy go.mod/go.sum:", err)
 	}
 
-	outputName := strings.TrimSuffix(filepath.Base(inputFile), ".osl")
-	outputPath := filepath.Join(cwd, outputName)
+	var outputPath string
+	if customOutput != "" {
+		if filepath.IsAbs(customOutput) {
+			outputPath = customOutput
+		} else {
+			outputPath = filepath.Join(cwd, customOutput)
+		}
+	} else {
+		outputName := inputFile
+		outputPath = filepath.Join(cwd, outputName)
+	}
 
 	args := []string{}
 	if max {
@@ -358,13 +386,11 @@ func main() {
 		uninstall()
 	case "origin":
 		browser.OpenURL("https://origin.mistium.com")
-	case "help":
-		response := HELP_MESSAGE
-		fmt.Println(fmt.Sprintf(response, OSL_VERSION))
 	case "version":
 		fmt.Println(OSL_VERSION)
 	default:
-		fmt.Println("Usage: osl <script> -o <output> -a (true/false generate ast)")
+		response := HELP_MESSAGE
+		fmt.Println(fmt.Sprintf(response, OSL_VERSION))
 		return
 	}
 }
