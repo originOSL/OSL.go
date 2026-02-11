@@ -1333,7 +1333,11 @@ func CompileCmd(cmd []*Token, ctx *VariableContext) string {
 
 func CompileObject(obj [][]*Token, ctx *VariableContext) string {
 	var out strings.Builder
-	out.WriteString("map[string]any{\n")
+	if ctx.Indent == 0 {
+		out.WriteString("newSafeMap(map[string]any{\n")
+	} else {
+		out.WriteString("map[string]any{\n")
+	}
 	for _, token := range obj {
 		keyStr := ""
 		switch token[0].Type {
@@ -1351,6 +1355,9 @@ func CompileObject(obj [][]*Token, ctx *VariableContext) string {
 			valueStr := CompileToken(token[1], ctx)
 			out.WriteString(AddIndent(fmt.Sprintf("%v: %v,\n", keyStr, valueStr), ctx.Indent*2))
 		}
+	}
+	if ctx.Indent == 0 {
+		return out.String() + "})"
 	}
 	return out.String() + AddIndent("}", (ctx.Indent-1)*2)
 }

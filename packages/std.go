@@ -497,6 +497,11 @@ func OSLgetItem(a any, b any) any {
 		return nil
 	}
 
+	if sm, ok := a.(*SafeMap[string, any]); ok {
+		val, _ := sm.Get(OSLcastString(b))
+		return val
+	}
+
 	if v, ok := a.(map[string]any); ok {
 		return v[OSLcastString(b)]
 	}
@@ -738,6 +743,11 @@ func OSLKeyIn(b any, a any) bool {
 		return false
 	}
 
+	if sm, ok := a.(*SafeMap[string, any]); ok {
+		_, exists := sm.Get(key)
+		return exists
+	}
+
 	key := OSLcastString(b)
 	switch a := a.(type) {
 	case map[string]any:
@@ -805,6 +815,11 @@ func OSLdelete(a any, b any) any {
 		return nil
 	}
 
+	if sm, ok := a.(*SafeMap[string, any]); ok {
+		sm.Delete(OSLcastString(b))
+		return a
+	}
+
 	switch a := a.(type) {
 	case map[string]any:
 		delete(a, OSLcastString(b))
@@ -851,6 +866,11 @@ func OSLdelete(a any, b any) any {
 func OSLsetItem(a any, b any, value any) bool {
 	if a == nil {
 		return false
+	}
+
+	if sm, ok := a.(*SafeMap[string, any]); ok {
+		sm.Set(OSLcastString(b), value)
+		return true
 	}
 
 	v := reflect.ValueOf(a)
@@ -945,6 +965,15 @@ func OSLarrayJoin(a any, b any) string {
 }
 
 func OSLgetKeys(a any) []any {
+	if sm, ok := a.(*SafeMap[string, any]); ok {
+		keys := sm.Keys()
+		result := make([]any, len(keys))
+		for i, k := range keys {
+			result[i] = k
+		}
+		return result
+	}
+
 	switch a := a.(type) {
 	case map[string]any:
 		keys := make([]any, len(a))
@@ -966,6 +995,15 @@ func OSLgetKeys(a any) []any {
 }
 
 func OSLgetValues(a any) []any {
+	if sm, ok := a.(*SafeMap[string, any]); ok {
+		values := sm.Values()
+		result := make([]any, len(values))
+		for i, v := range values {
+			result[i] = v
+		}
+		return result
+	}
+
 	switch a := a.(type) {
 	case map[string]any:
 		values := make([]any, len(a))
@@ -989,6 +1027,11 @@ func OSLgetValues(a any) []any {
 }
 
 func OSLcontains(a any, b any) bool {
+	if sm, ok := a.(*SafeMap[string, any]); ok {
+		_, exists := sm.Get(OSLcastString(b))
+		return exists
+	}
+
 	switch a := a.(type) {
 	case map[string]any:
 		_, ok := a[OSLcastString(b)]
@@ -1084,3 +1127,56 @@ func OSLworker(props map[string]any) map[string]any {
 	return props
 }
 
+type SafeMap[K comparable, V any] struct {
+	mu   sync.RWMutex
+	data map[K]V
+}
+
+func NewSafeMap[K comparable, V any](defaults map[K]V) *SafeMap[K, V] {
+	sm := &SafeMap[K, V]{
+		data: make(map[K]V, len(defaults)),
+	}
+	for k, v := range defaults {
+		sm.data[k] = v
+	}
+	return sm
+}
+
+func (m *SafeMap[K, V]) Set(key K, value V) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.data[key] = value // regular map syntax here
+}
+
+func (m *SafeMap[K, V]) Get(key K) (V, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	value, ok := m.data[key] // regular map syntax here
+	return value, ok
+}
+
+func (m *SafeMap[K, V]) Delete(key K) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.data, key)
+}
+
+func (m *SafeMap[K, V]) Keys() []K {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	keys := make([]K, 0, len(m.data))
+	for k := range m.data {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+func (m *SafeMap[K, V]) Values() []V {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	values := make([]V, 0, len(m.data))
+	for _, v := range m.data {
+		values = append(values, v)
+	}
+	return values
+}
