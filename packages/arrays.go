@@ -13,14 +13,14 @@ func (Arrays) SortBy(arr []any, key string) []any {
 	sort.Slice(arr, func(i, j int) bool {
 		m1 := arr[i].(map[string]any)
 		m2 := arr[j].(map[string]any)
-		return OSLcastString(m1[key]) < OSLcastString(m2[key])
+		return OSLtoString(m1[key]) < OSLtoString(m2[key])
 	})
 	return arr
 }
 
 func (Arrays) Sort(arr []any) []any {
 	sort.Slice(arr, func(i, j int) bool {
-		return OSLcastString(arr[i]) < OSLcastString(arr[j])
+		return OSLtoString(arr[i]) < OSLtoString(arr[j])
 	})
 	return arr
 }

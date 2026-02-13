@@ -686,11 +686,11 @@ func (utils *OSLUtils) StringToToken(cur string, param bool) *Token {
 		}
 		if start == '`' && cur[len(cur)-1] == '`' {
 			templateData := ParseTemplate(Destr(cur, "`"))
-			var filteredData []any
+			var filteredData []*Token
 			for _, v := range templateData {
 				if str, ok := v.(string); !ok || str != "" {
 					if str, ok := v.(string); ok && strings.HasPrefix(str, "${") && strings.HasSuffix(str, "}") {
-						ast := utils.GenerateAST(str, 0, false)
+						ast := utils.GenerateAST(strings.TrimSuffix(strings.TrimPrefix(str, "${"), "}"), 0, false)
 						if len(ast) == 0 {
 							continue
 						}
@@ -885,19 +885,53 @@ func (utils *OSLUtils) StringToToken(cur string, param bool) *Token {
 			for _, v := range method {
 				trimmed := strings.TrimSpace(v)
 				typePrefix := ""
-				ast := utils.GenerateAST(trimmed, 0, false)
-				if len(ast) == 0 {
-					continue
+
+				var paramToken *Token
+
+				if strings.HasPrefix(trimmed, "(\n") && strings.HasSuffix(trimmed, ")") {
+					paramToken = &Token{
+						Type:   TKN_BLK,
+						Data:   utils.GenerateFullAST(strings.TrimSpace(trimmed[1:len(trimmed)-1]), false),
+						Source: trimmed,
+					}
+				} else {
+					ast := utils.GenerateAST(trimmed, 0, false)
+					if len(ast) == 0 {
+						continue
+					}
+
+					if len(ast) > 1 {
+						paramToken = &Token{
+							Type:   TKN_BLK,
+							Data:   ast,
+							Source: trimmed,
+						}
+					} else {
+						firstTokenIsCall := ast[0].Type == TKN_FNC
+						isLoopCmd := funcName == "loop" || funcName == "for" || funcName == "while"
+						idxOfParam := slices.Index(method, v)
+						isLastParamNeededForLoop := (funcName == "loop" || funcName == "while") && idxOfParam == 1
+						isSecondParamNeededForFor := funcName == "for" && idxOfParam == 2
+
+						if (firstTokenIsCall && isLoopCmd && (isLastParamNeededForLoop || isSecondParamNeededForFor)) || (firstTokenIsCall && funcName == "if") {
+							paramToken = &Token{
+								Type:   TKN_BLK,
+								Data:   [][]*Token{ast},
+								Source: trimmed,
+							}
+						} else {
+							paramToken = ast[0]
+						}
+					}
 				}
-				if len(ast) > 1 {
-					parts := AutoTokenise(trimmed, " ")
+
+				parts := AutoTokenise(trimmed, " ")
+				if len(parts) > 1 && paramToken.Type != TKN_BLK {
 					typePrefix = parts[0]
-					ast = ast[1:]
+					paramToken.SetType = typePrefix
 				}
-				if typePrefix != "" {
-					ast[0].SetType = typePrefix
-				}
-				parsedParams = append(parsedParams, ast[0])
+
+				parsedParams = append(parsedParams, paramToken)
 			}
 			out.Parameters = parsedParams
 			return out
@@ -1117,11 +1151,24 @@ func (utils *OSLUtils) GenerateAST(code string, start int, main bool) []*Token {
 					funcName := second.Data.(string)
 					var params []string
 					for _, p := range second.Parameters {
-						if data, ok := p.Data.(string); ok {
-							if p.SetType != "" {
-								data = data + " " + p.SetType
+						var paramStr string
+						if blk, ok := p.Data.([]*Token); ok {
+							parts := []string{}
+							for _, t := range blk {
+								if s, ok := t.Data.(string); ok {
+									parts = append(parts, s)
+								}
 							}
-							params = append(params, data)
+							if len(parts) >= 2 {
+								paramStr = parts[1] + " " + parts[0]
+							} else if len(parts) == 1 {
+								paramStr = parts[0]
+							}
+						} else if data, ok := p.Data.(string); ok {
+							paramStr = data
+						}
+						if paramStr != "" {
+							params = append(params, paramStr)
 						}
 					}
 					paramSpec := strings.Join(params, ",")
@@ -1236,11 +1283,8 @@ func (utils *OSLUtils) GenerateAST(code string, start int, main bool) []*Token {
 		if cur.Type == TKN_ASI {
 			if len(ast) > 0 && ast[0].Type == TKN_VAR {
 				if data, ok := ast[0].Data.(string); ok && data == "local" {
-					if i > 0 {
-						prev := ast[i-1]
-						newPrev := &Token{Type: TKN_STR, Data: "this." + prev.Source}
-						ast[i-1] = newPrev
-					}
+					// local is just for readability - OSL is function-scoped
+					// Remove the local keyword without modifying the variable name
 					ast = append(ast[:0], ast[1:]...)
 					i--
 				}
@@ -1491,7 +1535,9 @@ func (utils *OSLUtils) GenerateFullAST(code string, main bool) [][]*Token {
 					continue
 				}
 
-				if len(cur) >= 4 && (cur[4] != nil && cur[4].Type == TKN_BLK || cur[3] != nil && cur[3].Type == TKN_BLK) {
+				hasBlockAt3 := len(cur) > 3 && cur[3] != nil && cur[3].Type == TKN_BLK
+				hasBlockAt4 := len(cur) > 4 && cur[4] != nil && cur[4].Type == TKN_BLK
+				if hasBlockAt3 || hasBlockAt4 {
 					cur[0].Data = "loop"
 				}
 			}
@@ -1524,9 +1570,43 @@ func (utils *OSLUtils) GenerateFullAST(code string, main bool) [][]*Token {
 		}
 
 		if contains([]string{"loop", "if", "while", "until", "for"}, cmdType) {
-			if len(cur) == 2 || (cmdType == "for" && len(cur) == 3) {
-				// Look for the next line as the block
-				if i+1 < len(filteredLines) {
+			// Check if the command has a parenthesized block (ending with '(')
+			hasUnclosedParen := len(cur) >= 2 && cur[len(cur)-1].Source == "(" && cur[len(cur)-1].Type == TKN_UNK
+
+			if len(cur) == 2 || (cmdType == "for" && len(cur) == 3) || (cmdType != "for" && len(cur) == 3 && hasUnclosedParen) {
+				// Look for the closing ) and collect lines as the block
+				blockLines := [][]*Token{}
+				foundEnd := false
+
+				for j := i + 1; j < len(filteredLines) && !foundEnd; j++ {
+					nextLine := filteredLines[j]
+					blockLines = append(blockLines, nextLine)
+
+					// Check if this line ends with )
+					if len(nextLine) > 0 && nextLine[len(nextLine)-1].Source == ")" && nextLine[len(nextLine)-1].Type == TKN_UNK {
+						foundEnd = true
+						// Remove the ) from the last line
+						blockLines[len(blockLines)-1] = nextLine[:len(nextLine)-1]
+					}
+				}
+
+				if foundEnd && len(blockLines) > 0 {
+					cur = append(cur, &Token{
+						Type:   TKN_BLK,
+						Data:   blockLines,
+						Source: "[ast BLK]",
+					})
+					filteredLines[i] = cur
+					// Remove the opening ( and the block lines from the main lines
+					cur = cur[:len(cur)-1]
+					filteredLines[i] = cur
+
+					newLines := append(filteredLines[:i+1], filteredLines[i+len(blockLines)+1:]...)
+					filteredLines = newLines
+					// Adjust index to account for removed lines
+					i = i
+				} else if !hasUnclosedParen && i+1 < len(filteredLines) {
+					// Look for the next line as the block (old behavior)
 					blk := filteredLines[i+1]
 					cur = append(cur, &Token{
 						Type:   TKN_BLK,

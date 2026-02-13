@@ -1,5 +1,17 @@
 // This is a set of funtions that are used in the compiler for OSL.go
 
+func getGamepads() []any {
+	// Stub implementation - returns empty array
+	// This should be implemented with actual gamepad support
+	return []any{}
+}
+
+func dist(x1, y1, x2, y2 float64) float64 {
+	dx := x1 - x2
+	dy := y1 - y2
+	return math.Sqrt(dx*dx + dy*dy)
+}
+
 func OSLlen(s any) int {
 	if s == nil {
 		return 0
@@ -19,7 +31,7 @@ func OSLlen(s any) int {
 		return len(s)
 	case []byte:
 		return len(s)
-	case []io.Reader:
+	case []OSLio.Reader:
 		return len(s)
 	}
 	v := reflect.ValueOf(s)
@@ -41,7 +53,7 @@ func OSLlen(s any) int {
 	panic("OSLlen, invalid type: " + v.Kind().String())
 }
 
-func OSLcastString(s any) string {
+func OSLtoString(s any) string {
 	switch s := s.(type) {
 	case string:
 		return s
@@ -51,10 +63,10 @@ func OSLcastString(s any) string {
 		return JsonStringify(s)
 	case map[string]any, map[string]string, map[string]int, map[string]float64, map[string]bool:
 		return JsonStringify(s)
-	case io.Reader:
-		data, err := io.ReadAll(s)
+	case OSLio.Reader:
+		data, err := OSLio.ReadAll(s)
 		if err != nil {
-			panic("OSLcastString: failed to read io.Reader:" + err.Error())
+			panic("OSLcastString: failed to read OSLio.Reader:" + err.Error())
 		}
 		return string(data)
 	default:
@@ -66,12 +78,12 @@ func OSLcastObject(s any) map[string]any {
 	if s == nil {
 		return map[string]any{}
 	}
-	switch s := s.(type) {
-	case map[string]any:
-		return s
-	default:
-		panic("OSLcastObject: invalid type, " + reflect.TypeOf(s).String())
+	obj, ok := s.(map[string]any)
+	if ok {
+		return obj
 	}
+	panic("OSLcastObject, invalid type: " + reflect.TypeOf(s).String())
+
 }
 
 func OSLcastArray(values ...any) []any {
@@ -109,14 +121,14 @@ func OSLequal(a any, b any) bool {
 	if a == b {
 		return true
 	}
-	return strings.EqualFold(OSLcastString(a), OSLcastString(b))
+	return strings.EqualFold(OSLtoString(a), OSLtoString(b))
 }
 
 func OSLnotEqual(a any, b any) bool {
 	if a == b {
 		return false
 	}
-	return !strings.EqualFold(OSLcastString(a), OSLcastString(b))
+	return !strings.EqualFold(OSLtoString(a), OSLtoString(b))
 }
 
 func OSLcastInt(i any) int {
@@ -289,7 +301,7 @@ func OSLsort(arr []any) []any {
 	}
 
 	sort.Slice(arr, func(i, j int) bool {
-		return OSLcastString(arr[i]) < OSLcastString(arr[j])
+		return OSLtoString(arr[i]) < OSLtoString(arr[j])
 	})
 	return arr
 }
@@ -309,7 +321,7 @@ func OSLsortBy(arr []any, key any) []any {
 		return arr
 	}
 
-	keyStr := OSLcastString(key)
+	keyStr := OSLtoString(key)
 	sort.Slice(arr, func(i, j int) bool {
 		ai, ok1 := arr[i].(map[string]any)
 		aj, ok2 := arr[j].(map[string]any)
@@ -331,14 +343,14 @@ func OSLless(a any, b any) bool {
 	if a == b {
 		return false
 	}
-	return OSLcastString(a) < OSLcastString(b)
+	return OSLtoString(a) < OSLtoString(b)
 }
 
 func OSLgreater(a any, b any) bool {
 	if a == b {
 		return false
 	}
-	return OSLcastString(a) > OSLcastString(b)
+	return OSLtoString(a) > OSLtoString(b)
 }
 
 func OSLcastNumber(n any) float64 {
@@ -423,10 +435,10 @@ func OSLrandom[T int | float64](low, high T) T {
 
 	switch any(low).(type) {
 	case int:
-		return T(rand.Intn(int(high-low)) + int(low))
+		return T(OSLrand.Intn(int(high-low)) + int(low))
 
 	case float64:
-		return (T(rand.Float64()) * (high - low)) + low
+		return (T(OSLrand.Float64()) * (high - low)) + low
 	}
 
 	panic("OSLrandom: unsupported type")
@@ -498,12 +510,12 @@ func OSLgetItem(a any, b any) any {
 	}
 
 	if sm, ok := a.(*SafeMap[string, any]); ok {
-		val, _ := sm.Get(OSLcastString(b))
+		val, _ := sm.Get(OSLtoString(b))
 		return val
 	}
 
 	if v, ok := a.(map[string]any); ok {
-		return v[OSLcastString(b)]
+		return v[OSLtoString(b)]
 	}
 
 	v := reflect.ValueOf(a)
@@ -514,7 +526,7 @@ func OSLgetItem(a any, b any) any {
 		v = v.Elem()
 	}
 
-	key := OSLcastString(b)
+	key := OSLtoString(b)
 
 	switch v.Kind() {
 	case reflect.Map:
@@ -566,7 +578,7 @@ func OSLjoin[T string | []any, T2 string | []any](a T, b T2) T {
 		}
 	}
 
-	return any(OSLcastString(a) + OSLcastString(b)).(T)
+	return any(OSLtoString(a) + OSLtoString(b)).(T)
 }
 
 func OSLadd[T float64 | int](a T, b T) T {
@@ -577,20 +589,25 @@ func OSLsub[T float64 | int](a T, b T) T {
 	return T(OSLcastNumber(a) - OSLcastNumber(b))
 }
 
-func OSLmultiply[BT float64 | int](a any, b BT) any {
-	if str, ok := a.(string); ok {
+func OSLmultiply[AT float64 | int | string, BT float64 | int](a AT, b BT) AT {
+	if str, ok := any(a).(string); ok {
 		n := OSLcastNumber(b)
+		var out string
 		if n < 0 {
-			return ""
+			out = ""
 		}
-		return strings.Repeat(str, int(n))
+		out = strings.Repeat(str, int(n))
+		if n < 0 {
+			out = ""
+		}
+		return any(out).(AT)
 	}
 
-	return OSLcastNumber(a) * OSLcastNumber(b)
+	return AT(any(OSLcastNumber(a) * OSLcastNumber(b)).(AT))
 }
 
-func OSLdivide[T float64 | int](a T, b T) T {
-	return T(OSLcastNumber(a) / OSLcastNumber(b))
+func OSLdivide[T float64 | int](a T, b T) float64 {
+	return float64(OSLcastNumber(a) / OSLcastNumber(b))
 }
 
 func OSLmod[T float64 | int](a T, b T) T {
@@ -648,7 +665,7 @@ func OSLfloor(n any) float64 {
 }
 
 func OSLtrim(s any, from int, to int) string {
-	str := []rune(OSLcastString(s))
+	str := []rune(OSLtoString(s))
 
 	start := from - 1
 	end := to
@@ -743,7 +760,7 @@ func OSLKeyIn(b any, a any) bool {
 		return false
 	}
 
-	key := OSLcastString(b)
+	key := OSLtoString(b)
 	if sm, ok := a.(*SafeMap[string, any]); ok {
 		_, exists := sm.Get(key)
 		return exists
@@ -755,7 +772,7 @@ func OSLKeyIn(b any, a any) bool {
 		return ok
 	case []any:
 		for _, v := range a {
-			if OSLcastString(v) == key {
+			if OSLtoString(v) == key {
 				return true
 			}
 		}
@@ -816,13 +833,13 @@ func OSLdelete(a any, b any) any {
 	}
 
 	if sm, ok := a.(*SafeMap[string, any]); ok {
-		sm.Delete(OSLcastString(b))
+		sm.Delete(OSLtoString(b))
 		return a
 	}
 
 	switch a := a.(type) {
 	case map[string]any:
-		delete(a, OSLcastString(b))
+		delete(a, OSLtoString(b))
 		return a
 	case []any:
 		idx := OSLcastInt(b) - 1
@@ -840,7 +857,7 @@ func OSLdelete(a any, b any) any {
 		v = v.Elem()
 	}
 
-	key := OSLcastString(b)
+	key := OSLtoString(b)
 
 	switch v.Kind() {
 	case reflect.Map:
@@ -869,7 +886,7 @@ func OSLsetItem(a any, b any, value any) bool {
 	}
 
 	if sm, ok := a.(*SafeMap[string, any]); ok {
-		sm.Set(OSLcastString(b), value)
+		sm.Set(OSLtoString(b), value)
 		return true
 	}
 
@@ -881,7 +898,7 @@ func OSLsetItem(a any, b any, value any) bool {
 		v = v.Elem()
 	}
 
-	key := OSLcastString(b)
+	key := OSLtoString(b)
 
 	switch v.Kind() {
 	case reflect.Map:
@@ -954,11 +971,11 @@ func setFieldUnsafe(field reflect.Value, val reflect.Value) bool {
 
 func OSLarrayJoin(a any, b any) string {
 	var out strings.Builder
-	sep := OSLcastString(b)
+	sep := OSLtoString(b)
 	arr := OSLcastArray(a)
 
 	for _, v := range arr {
-		out.WriteString(OSLcastString(v) + sep)
+		out.WriteString(OSLtoString(v) + sep)
 	}
 
 	return strings.TrimSuffix(out.String(), sep)
@@ -998,9 +1015,7 @@ func OSLgetValues(a any) []any {
 	if sm, ok := a.(*SafeMap[string, any]); ok {
 		values := sm.Values()
 		result := make([]any, len(values))
-		for i, v := range values {
-			result[i] = v
-		}
+		copy(result, values)
 		return result
 	}
 
@@ -1028,23 +1043,23 @@ func OSLgetValues(a any) []any {
 
 func OSLcontains(a any, b any) bool {
 	if sm, ok := a.(*SafeMap[string, any]); ok {
-		_, exists := sm.Get(OSLcastString(b))
+		_, exists := sm.Get(OSLtoString(b))
 		return exists
 	}
 
 	switch a := a.(type) {
 	case map[string]any:
-		_, ok := a[OSLcastString(b)]
+		_, ok := a[OSLtoString(b)]
 		return ok
 	case []any:
 		for _, v := range a {
-			if OSLcastString(v) == OSLcastString(b) {
+			if OSLtoString(v) == OSLtoString(b) {
 				return true
 			}
 		}
 		return false
 	case string:
-		return strings.Contains(a, OSLcastString(b))
+		return strings.Contains(a, OSLtoString(b))
 	default:
 		return false
 	}
@@ -1179,4 +1194,20 @@ func (m *SafeMap[K, V]) Values() []V {
 		values = append(values, v)
 	}
 	return values
+}
+
+// Keyboard methods (stub implementations)
+// Note: These are defined as methods on a custom string type
+type OSLString string
+
+func (s OSLString) onKeyDown() bool {
+	return false
+}
+
+func (s OSLString) isKeyDown() bool {
+	return false
+}
+
+func (s OSLString) toNum() float64 {
+	return OSLcastNumber(string(s))
 }

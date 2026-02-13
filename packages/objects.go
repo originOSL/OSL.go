@@ -70,7 +70,7 @@ func (Objects) Values(obj map[string]any) []any {
 }
 
 func (Objects) Has(obj map[string]any, key any) bool {
-	_, ok := obj[OSLcastString(key)]
+	_, ok := obj[OSLtoString(key)]
 	return ok
 }
 

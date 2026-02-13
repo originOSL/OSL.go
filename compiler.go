@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"os"
 	"regexp"
@@ -26,7 +27,23 @@ type VariableContext struct {
 	Imports             map[string]bool
 	selfTypes           map[string]string
 	ImportOrder         []string
+	ImportAliases       map[string]string
 	selfUsed            bool
+	CustomCommands      map[string]bool
+	ScopeLevel          int
+	GlobalDeclaredVars  map[string]bool
+	GlobalVariableTypes map[string]string
+	builtinTypeMethods  map[string]map[string]MethodDefinition
+	IsInit              bool
+	GlobalVars          strings.Builder
+	HoistedVars         []string
+}
+
+type MethodDefinition struct {
+	TypeName   string
+	MethodName string
+	ReturnType string
+	Token      *Token
 }
 
 func include(path string) string {
@@ -182,20 +199,107 @@ func Compile(ast [][]*Token) string {
 			"unsafe",
 			"sync",
 		},
+		ImportAliases: map[string]string{
+			"io":        "OSLio",
+			"math/rand": "OSLrand",
+		},
 		DeclaredVars:        make(map[string]bool),
 		VariableTypes:       make(map[string]string),
+		GlobalDeclaredVars:  make(map[string]bool),
+		GlobalVariableTypes: make(map[string]string),
 		functionReturnTypes: make(map[string]string),
 		selfTypes:           make(map[string]string),
 		selfUsed:            false,
+		CustomCommands:      make(map[string]bool),
+		builtinTypeMethods:  make(map[string]map[string]MethodDefinition),
+		IsInit:              false,
 	}
 
-	mainCompiled := CompileBlock(ast, ctx)
+	var init [][]*Token
+	var main [][]*Token
+
+	pivot := -1
+	for i, line := range ast {
+		if line[0].Type == TKN_CMD && line[0].Data == "mainloop:" {
+			pivot = i
+			break
+		}
+	}
+
+	var topLevelFuncs [][]*Token
+	var initNoFuncs [][]*Token
+	initCompiled := ""
+	mainCompiled := ""
+
+	if pivot >= 0 {
+		init = ast[:pivot]
+		main = make([][]*Token, len(ast)-pivot-1)
+		copy(main, ast[pivot+1:])
+
+		hasDrawingCommands := HasDrawingCommands(append(init, main...))
+
+		if hasDrawingCommands {
+			ctx.Imports["osl/window"] = true
+			ctx.ImportOrder = append([]string{"osl/window"}, ctx.ImportOrder...)
+		}
+
+		for _, line := range init {
+			if len(line) > 0 {
+				// Extract function assignments
+				if line[0].Type == TKN_ASI {
+					if line[0].Right != nil && line[0].Right.Type == TKN_FNC && line[0].Left.Type == TKN_VAR &&
+						line[0].Right.Data == "function" && ctx.Indent == 0 {
+						topLevelFuncs = append(topLevelFuncs, line)
+						continue
+					}
+				}
+				// Extract def commands
+				if line[0].Type == TKN_CMD && line[0].Data == "def" {
+					topLevelFuncs = append(topLevelFuncs, line)
+					continue
+				}
+				initNoFuncs = append(initNoFuncs, line)
+			}
+		}
+
+		// Compile the initialization first to populate global variables
+		ctx.IsInit = true
+		ctx.GlobalVars = strings.Builder{}
+		initCompiled = CompileBlock(initNoFuncs, ctx)
+
+		// Save the global state for functions
+		ctx.GlobalDeclaredVars = make(map[string]bool)
+		maps.Copy(ctx.GlobalDeclaredVars, ctx.DeclaredVars)
+		ctx.GlobalVariableTypes = make(map[string]string)
+		maps.Copy(ctx.GlobalVariableTypes, ctx.VariableTypes)
+
+		ctx.IsInit = false
+		funcsCompiled := ""
+		if len(topLevelFuncs) > 0 {
+			funcsCompiled = CompileBlock(topLevelFuncs, ctx)
+		}
+
+		funcsCompiled = ctx.GlobalVars.String() + funcsCompiled
+
+		mainCompiled = CompileBlock(main, ctx)
+
+		if hasDrawingCommands {
+			mainCompiled = funcsCompiled + "\nfunc main() {\n\twindow.Create(OSLsetup)\n}\n\nfunc OSLsetup(window *OSLWindow) {\n" + initCompiled + "\twindow.loop = func(window *OSLWindow) {\n" + AddIndent(mainCompiled, 2) + "\n\t}\n}\n"
+		} else {
+			mainCompiled = funcsCompiled + initCompiled + "func main() {\n" + mainCompiled + "}\n\n"
+		}
+	} else {
+		init = ast
+		main = [][]*Token{}
+	}
+
+	// Process imports and prepends
 
 	importsCompiled, goImports := processImports(ctx)
 
-	prepend := ""
+	var prepend strings.Builder
 	for _, v := range ctx.Prepend {
-		prepend += fmt.Sprintf("%v", v)
+		fmt.Fprintf(&prepend, "%v", v)
 	}
 
 	if len(goImports) > 0 {
@@ -214,30 +318,350 @@ func Compile(ast [][]*Token) string {
 				alias := strings.TrimSpace(parts[1])
 				uniqueImports = append(uniqueImports, fmt.Sprintf("%s %q", alias, actualPkg))
 			} else {
-				uniqueImports = append(uniqueImports, fmt.Sprintf("%q", strings.TrimSpace(pkg)))
+				if alias, ok := ctx.ImportAliases[pkg]; ok {
+					uniqueImports = append(uniqueImports, fmt.Sprintf("%s %q", alias, pkg))
+				} else {
+					uniqueImports = append(uniqueImports, fmt.Sprintf("%q", strings.TrimSpace(pkg)))
+				}
 			}
 		}
 
-		prepend += "import (\n"
+		prepend.WriteString("import (\n")
 		for _, imp := range uniqueImports {
-			prepend += "\t" + imp + "\n"
+			prepend.WriteString("\t" + imp + "\n")
 		}
-		prepend += ")\n\n"
+		prepend.WriteString(")\n\n")
+		prepend.WriteString("var OSLwincreatetime float64 = OSLcastNumber(time.Now().UnixMilli())\n")
+		prepend.WriteString("var OSLsystem_os = runtime.GOOS\n")
+		prepend.WriteString("var OSLtimer func() float64 = func() float64 { return float64(time.Now().Unix()) - (OSLwincreatetime / 1000) }\n")
+		prepend.WriteString("var OSLtimestamp func() int64 = func() int64 { return time.Now().UnixMilli() }\n")
+		prepend.WriteString("var timer float64\n")
+		prepend.WriteString("var timestamp int64\n")
+		prepend.WriteString("func OSLupdateTimer() {\n\ttimer = OSLtimer()\n\ttimestamp = OSLtimestamp()\n}\n\n")
+		prepend.WriteString(include("packages/std.go"))
 	}
 
-	prepend += "var wincreatetime float64 = OSLcastNumber(time.Now().UnixMilli())\n"
-	prepend += "var system_os = runtime.GOOS\n\n"
-	prepend += include("packages/std.go")
+	var methodsCompiled strings.Builder
+	for typeName, methods := range ctx.builtinTypeMethods {
+		goType := oslTypes[typeName]
+		capitalizedTypeName := strings.ToUpper(string(typeName[0])) + typeName[1:]
+		for methodName, methodDef := range methods {
+			capitalizedMethodName := strings.ToUpper(string(methodName[0])) + methodName[1:]
+			funcName := fmt.Sprintf("OSLMET%s%s", capitalizedTypeName, capitalizedMethodName)
 
-	return prepend + importsCompiled + mainCompiled
+			funcNode := methodDef.Token
+			var params_string string
+			if len(funcNode.Parameters) > 0 {
+				args := strings.Split(funcNode.Parameters[0].Data.(string), ",")
+				for _, arg := range args {
+					arg = strings.TrimSpace(arg)
+					if arg == "" {
+						continue
+					}
+					parts := strings.Split(arg, " ")
+					typeNameValue := goType // Default to receiver's type
+					varName := arg
+					if len(parts) > 1 {
+						typeNameValue = mapOSLTypeToGo(parts[1])
+						varName = parts[0]
+					}
+					params_string += fmt.Sprintf("%v %v, ", varName, typeNameValue)
+				}
+			}
+			params_string = strings.TrimSuffix(params_string, ", ")
+
+			returnType := ""
+			if methodDef.ReturnType != "" {
+				returnType = mapOSLTypeToGo(methodDef.ReturnType) + " "
+			}
+
+			funcBody := ""
+			var blockData [][]*Token
+			if len(funcNode.Parameters) > 1 && funcNode.Parameters[1] != nil {
+				if bd, ok := funcNode.Parameters[1].Data.([][]*Token); ok {
+					blockData = bd
+					savedDeclaredVars := ctx.DeclaredVars
+					ctx.DeclaredVars = make(map[string]bool)
+					funcBody = CompileBlock(blockData, ctx)
+					if ctx.selfUsed {
+						funcBody = AddIndent("OSLself := self\n", ctx.Indent*2) + funcBody
+						ctx.selfUsed = false
+					}
+					ctx.DeclaredVars = savedDeclaredVars
+				}
+			}
+
+			hasReturn := hasReturnStatement(blockData)
+			// Methods without explicit return type always return any
+			if returnType == "" {
+				returnType = "any "
+			}
+
+			// If no return statement and return type is any, add return nil
+			if returnType == "any " && !hasReturn {
+				funcBody += AddIndent("return nil\n", ctx.Indent*2)
+			}
+
+			funcSignature := fmt.Sprintf("func %v(self %v", funcName, goType)
+			if params_string != "" {
+				funcSignature += ", " + params_string
+			}
+			fmt.Fprintf(&methodsCompiled, "%v) %v{\n%v}\n\n", funcSignature, returnType, funcBody)
+		}
+	}
+
+	return prepend.String() + methodsCompiled.String() + importsCompiled + mainCompiled
+}
+
+func HasDrawingCommands(ast [][]*Token) bool {
+	drawingCommands := map[string]bool{
+		"c": true, "color": true, "colour": true,
+		"goto": true, "change": true, "change_x": true, "change_y": true,
+		"loc":       true,
+		"square":    true,
+		"icon":      true,
+		"text":      true,
+		"centext":   true,
+		"turnright": true, "turnleft": true, "pointat": true,
+		"direction": true,
+	}
+
+	for _, line := range ast {
+		if len(line) > 0 && line[0].Type == TKN_CMD {
+			cmdName := fmt.Sprintf("%v", line[0].Data)
+			if drawingCommands[cmdName] {
+				return true
+			}
+		}
+		for _, token := range line {
+			if token.Type == TKN_MOD {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func hasReturnStatement(block [][]*Token) bool {
+	for _, line := range block {
+		if len(line) > 0 && line[0].Type == TKN_CMD && line[0].Data == "return" {
+			return true
+		}
+
+		if len(line) > 0 && line[0].Type == TKN_BLK {
+			if subBlock, ok := line[0].Data.([][]*Token); ok {
+				if hasReturnStatement(subBlock) {
+					return true
+				}
+			}
+		}
+
+		if len(line) > 0 && line[0].Type == TKN_FNC && line[0].Data == "function" {
+			if len(line[0].Parameters) > 1 && line[0].Parameters[1] != nil {
+				if subBlock, ok := line[0].Parameters[1].Data.([][]*Token); ok {
+					if hasReturnStatement(subBlock) {
+						return true
+					}
+				}
+			}
+		}
+	}
+	return false
+}
+
+func OSLcastToString(expr string, typeHint string) string {
+	if typeHint == TYPE_STR {
+		return expr
+	}
+	return fmt.Sprintf("OSLtoString(%v)", expr)
+}
+
+func collectVariableDeclarations(block [][]*Token, ctx *VariableContext) map[string]string {
+	varDecls := make(map[string]string)
+	savedDeclaredVars := make(map[string]bool)
+	for k, v := range ctx.DeclaredVars {
+		savedDeclaredVars[k] = v
+	}
+
+	for _, line := range block {
+		if len(line) == 0 {
+			continue
+		}
+
+		if line[0].Type == TKN_ASI {
+			if line[0].Left != nil && line[0].Left.Type == TKN_VAR {
+				varName := line[0].Left.Data.(string)
+				if !savedDeclaredVars[varName] && !ctx.GlobalDeclaredVars[varName] {
+					var varType string = "any"
+					if line[0].SetType != "" {
+						varType = mapOSLTypeToGo(line[0].SetType)
+					} else if line[0].Right != nil && line[0].Right.ReturnedType != "" {
+						switch line[0].Right.ReturnedType {
+						case TYPE_STR:
+							varType = "string"
+						case TYPE_INT:
+							varType = "int"
+						case TYPE_NUM:
+							varType = "float64"
+						case TYPE_BOOL:
+							varType = "bool"
+						case TYPE_ARR:
+							varType = "[]any"
+						case TYPE_OBJ:
+							varType = "map[string]any"
+						}
+					}
+					varDecls[varName] = varType
+				}
+			}
+		}
+
+		if line[0].Type == TKN_BLK {
+			blk := line[0].Data.([][]*Token)
+			for _, subLine := range blk {
+				if len(subLine) > 0 && subLine[0].Type == TKN_CMD {
+					if data, ok := subLine[0].Data.(string); ok && data == "def" {
+						if len(subLine) > 2 {
+							argsStr := ""
+							if subLine[1].Type == TKN_STR {
+								argsStr = subLine[1].Data.(string)
+							}
+							args := strings.Split(argsStr, ",")
+							for _, arg := range args {
+								arg = strings.TrimSpace(arg)
+								if arg == "" {
+									continue
+								}
+								savedDeclaredVars[arg] = true
+							}
+						}
+					}
+				}
+			}
+		}
+
+		if line[0].Type == TKN_BLK {
+			blk := line[0].Data.([][]*Token)
+			saveIndent := ctx.Indent
+			ctx.Indent++
+			subDecls := collectVariableDeclarations(blk, ctx)
+			ctx.Indent = saveIndent
+			for k, v := range subDecls {
+				varDecls[k] = v
+			}
+		}
+	}
+
+	return varDecls
 }
 
 func CompileBlock(block [][]*Token, ctx *VariableContext) string {
 	var out strings.Builder
+
+	varDecls := collectVariableDeclarations(block, ctx)
+
+	for varName, varType := range varDecls {
+		if !ctx.DeclaredVars[varName] {
+			ctx.DeclaredVars[varName] = true
+			if varType != "" {
+				ctx.VariableTypes[varName] = varType
+				if ctx.IsInit && ctx.Indent == 0 {
+					fmt.Fprintf(&ctx.GlobalVars, "var %v %v\n", varName, varType)
+					ctx.GlobalDeclaredVars[varName] = true
+				} else {
+					out.WriteString(AddIndent(fmt.Sprintf("var %v %v\n", varName, varType), ctx.Indent*2))
+				}
+			} else {
+				if ctx.IsInit && ctx.Indent == 0 {
+					fmt.Fprintf(&ctx.GlobalVars, "var %v\n", varName)
+					ctx.GlobalDeclaredVars[varName] = true
+				} else {
+					out.WriteString(AddIndent(fmt.Sprintf("var %v\n", varName), ctx.Indent*2))
+				}
+			}
+		}
+	}
+
 	for _, line := range block {
 		out.WriteString(AddIndent(CompileLine(line, ctx), ctx.Indent*2))
 	}
+
 	return out.String()
+}
+
+func CompileModifier(mod *Token, ctx *VariableContext) string {
+	var cmdData []any
+	if data, ok := mod.Data.([]any); ok {
+		cmdData = data
+	} else {
+		cmdData = []any{mod.Data}
+	}
+
+	cmdName := ""
+	var argToken *Token
+
+	if len(cmdData) >= 2 {
+		if firstPart, ok := cmdData[0].(string); ok {
+			cmdName = firstPart
+		}
+		if tokenArg, ok := cmdData[1].(*Token); ok {
+			if cmdName == "c" {
+				newToken := &Token{
+					Type:   TKN_STR,
+					Data:   tokenArg.Source,
+					Source: tokenArg.Source,
+				}
+				argToken = newToken
+			} else {
+				argToken = tokenArg
+			}
+		} else {
+			argToken = &Token{
+				Type:   TKN_NUM,
+				Data:   cmdData[1],
+				Source: fmt.Sprintf("%v", cmdData[1]),
+			}
+		}
+	} else if len(cmdData) == 1 {
+		if s, ok := cmdData[0].(string); ok {
+			before, after, ok0 := strings.Cut(s, "#")
+			if ok0 {
+				cmdName = before
+				argData := after
+				argToken = &Token{
+					Type:   TKN_STR,
+					Data:   argData,
+					Source: argData,
+				}
+			} else {
+				cmdName = s
+			}
+		} else {
+			cmdName = fmt.Sprintf("%v", cmdData[0])
+		}
+	}
+
+	var fullCmdName string
+	switch cmdName {
+	case "c":
+		fullCmdName = "color"
+	case "chx":
+		fullCmdName = "change_x"
+	case "chy":
+		fullCmdName = "change_y"
+	default:
+		fullCmdName = cmdName
+	}
+
+	cmdTokens := []*Token{
+		{Type: TKN_CMD, Data: fullCmdName},
+	}
+
+	if argToken != nil {
+		cmdTokens = append(cmdTokens, argToken)
+	}
+
+	return CompileCmd(cmdTokens, ctx)
 }
 
 func CompileLine(line []*Token, ctx *VariableContext) string {
@@ -253,11 +677,30 @@ func CompileLine(line []*Token, ctx *VariableContext) string {
 		}
 	}()
 
-	if line[0].Type == TKN_CMD {
-		out += CompileCmd(line, ctx)
+	var modifiers []*Token
+	var mainLine []*Token
+
+	for _, token := range line {
+		if token.Type == TKN_MOD {
+			modifiers = append(modifiers, token)
+		} else {
+			mainLine = append(mainLine, token)
+		}
+	}
+
+	for _, mod := range modifiers {
+		out += CompileModifier(mod, ctx)
+	}
+
+	if len(mainLine) == 0 {
+		return out + "\n"
+	}
+
+	if mainLine[0].Type == TKN_CMD {
+		out += CompileCmd(mainLine, ctx)
 		return out
 	}
-	for _, token := range line {
+	for _, token := range mainLine {
 		out += CompileToken(token, ctx)
 	}
 	return out + "\n"
@@ -284,8 +727,15 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 
 	switch token.Type {
 	case TKN_ASI:
-		if token.Right.Type == TKN_FNC && token.Left.Type == TKN_VAR && token.Right.Data == "function" && ctx.Indent == 0 {
+		if token.Right != nil && token.Left != nil &&
+			token.Right.Type == TKN_FNC && token.Left.Type == TKN_VAR &&
+			token.Right.Data == "function" && ctx.Indent == 0 {
 			ctx.Indent++
+			ctx.ScopeLevel++
+
+			savedDeclaredVars := ctx.DeclaredVars
+			ctx.DeclaredVars = make(map[string]bool)
+
 			params_string := ""
 			if len(token.Right.Parameters) > 0 {
 				params := token.Right.Parameters
@@ -302,6 +752,9 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 						typeName = mapOSLTypeToGo(parts[1])
 						varName = parts[0]
 					}
+
+					ctx.DeclaredVars[varName] = true
+					ctx.VariableTypes[varName] = typeName
 					params_string += fmt.Sprintf("%v %v, ", varName, typeName)
 				}
 			}
@@ -312,8 +765,10 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 			}
 
 			funcBody := ""
+			var blockData [][]*Token
 			if len(token.Right.Parameters) > 1 && token.Right.Parameters[1] != nil {
-				if blockData, ok := token.Right.Parameters[1].Data.([][]*Token); ok {
+				if bd, ok := token.Right.Parameters[1].Data.([][]*Token); ok {
+					blockData = bd
 					funcBody = CompileBlock(blockData, ctx)
 					if ctx.selfUsed {
 						params_string = "OSLself any, " + params_string
@@ -322,10 +777,25 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 				}
 			}
 
+			hasReturn := hasReturnStatement(blockData)
+
+			if returns == "" && hasReturn {
+				returns = "any "
+			}
+
 			out := "func " + token.Left.Data.(string) + "(" +
 				params_string + ") " + returns + "{\n" +
-				funcBody + "}"
+				funcBody
+
+			if returns == "any " && hasReturn && !strings.Contains(funcBody, "return ") {
+				out += "return nil\n"
+			}
+
+			out += "}"
+
+			ctx.DeclaredVars = savedDeclaredVars
 			ctx.Indent--
+			ctx.ScopeLevel--
 			return out
 		}
 
@@ -339,6 +809,12 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 			op = "="
 		case ":=":
 			op = ":="
+		case "++":
+			op = "+="
+			compiledRight = "1"
+		case "--":
+			op = "-="
+			compiledRight = "1"
 		case "++=":
 			op = "+="
 		case "+=":
@@ -394,6 +870,20 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 
 			typeStr, hasType := oslTypes[objPath]
 			if ctx.Indent == 0 && hasType && keyExpr.Type == TKN_VAR && token.Right.Type == TKN_FNC && token.Right.Data == "function" {
+				if token.Data == "@=" {
+					if methodName, ok := keyExpr.Data.(string); ok {
+						if ctx.builtinTypeMethods[objPath] == nil {
+							ctx.builtinTypeMethods[objPath] = make(map[string]MethodDefinition)
+						}
+						ctx.builtinTypeMethods[objPath][methodName] = MethodDefinition{
+							TypeName:   objPath,
+							MethodName: methodName,
+							ReturnType: token.Right.Returns,
+							Token:      token.Right,
+						}
+						return ""
+					}
+				}
 				funcPart := strings.TrimPrefix(strings.TrimSuffix(compiledRight, ")"), "(func")
 				return fmt.Sprintf("func (OSLself %v) %v%v", typeStr, keyExpr.Data, funcPart)
 			} else if isRaw {
@@ -417,7 +907,7 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 				switch tokenType {
 				case "string":
 					if token.Right.ReturnedType != TYPE_STR {
-						compiledRight = fmt.Sprintf("OSLcastString(%v)", compiledRight)
+						compiledRight = fmt.Sprintf("OSLtoString(%v)", compiledRight)
 					}
 				case "int":
 					if token.Right.ReturnedType == TYPE_NUM {
@@ -448,14 +938,19 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 						compiledRight = fmt.Sprintf("OSLcastObject(%v)", compiledRight)
 					}
 				}
-				if goType == "auto" && op == "=" {
-					return fmt.Sprintf("var %v %v %v", varName, op, compiledRight)
+				if ctx.IsInit && ctx.Indent == 0 && op == "=" {
+					fmt.Fprintf(&ctx.GlobalVars, "var %v %v = %v\n", varName, goType, compiledRight)
+					ctx.GlobalDeclaredVars[varName] = true
+					return ""
 				}
-				return fmt.Sprintf("var %v %v %v %v", varName, goType, op, compiledRight)
+				if goType == "auto" && op == "=" {
+					return fmt.Sprintf("%v := %v", varName, compiledRight)
+				}
+				return fmt.Sprintf("%v := %v", varName, compiledRight)
 			}
 			if !declared {
 				inferredType := ""
-				if strings.HasPrefix(compiledRight, "OSLcastString(") {
+				if strings.HasPrefix(compiledRight, "OSLtoString(") {
 					inferredType = "string"
 				} else if strings.HasPrefix(compiledRight, "OSLcastNumber(") {
 					inferredType = "float64"
@@ -480,7 +975,7 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 					case "[]any":
 						compiledRight = fmt.Sprintf("%v.([]any)", compiledRight)
 					case "string":
-						compiledRight = fmt.Sprintf("OSLcastString(%v)", compiledRight)
+						compiledRight = fmt.Sprintf("OSLtoString(%v)", compiledRight)
 					case "int":
 						compiledRight = fmt.Sprintf("OSLcastInt(%v)", compiledRight)
 					case "float64":
@@ -491,11 +986,20 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 				}
 			}
 
+			var varOut string
 			if op == ":=" {
-				return fmt.Sprintf("var %v = %v", varName, compiledRight)
+				varOut = fmt.Sprintf("var %v = %v", varName, compiledRight)
+			} else if op == "=" && !declared && !ctx.GlobalDeclaredVars[varName] && token.SetType == "" {
+				varOut = fmt.Sprintf("var %v = %v", varName, compiledRight)
+				if ctx.IsInit && ctx.Indent == 0 {
+					ctx.GlobalVars.WriteString(varOut + "\n")
+					ctx.GlobalDeclaredVars[varName] = true
+					return ""
+				}
 			} else {
-				return fmt.Sprintf("%v %v %v", varName, op, compiledRight)
+				varOut = fmt.Sprintf("%v %v %v", varName, op, compiledRight)
 			}
+			return varOut
 		}
 		return fmt.Sprintf("%v %v %v", compiledLeft, op, compiledRight)
 	case TKN_OPR:
@@ -524,6 +1028,10 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 				token.ReturnedType = TYPE_NUM
 				return fmt.Sprintf("(%v + %v)", compiledLeft, compiledRight)
 			}
+			if LT == TYPE_STR || RT == TYPE_STR {
+				token.ReturnedType = TYPE_STR
+				return fmt.Sprintf("(%v + \" \" + %v)", OSLcastToString(compiledLeft, LT), OSLcastToString(compiledRight, RT))
+			}
 			return fmt.Sprintf("OSLadd(%v, %v)", compiledLeft, compiledRight)
 		case "-":
 			if LT != "" || RT != "" {
@@ -540,7 +1048,7 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 		case "++":
 			if isAbsolutelyNot(LT, TYPE_ARR) || isAbsolutelyNot(RT, TYPE_ARR) {
 				token.ReturnedType = TYPE_STR
-				return fmt.Sprintf("(%v + %v)", compiledLeft, compiledRight)
+				return fmt.Sprintf("(%v + %v)", OSLcastToString(compiledLeft, LT), OSLcastToString(compiledRight, RT))
 			}
 			return fmt.Sprintf("OSLjoin(%v, %v)", compiledLeft, compiledRight)
 		}
@@ -564,15 +1072,35 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 		}
 		return fmt.Sprintf("%v %v %v", compiledLeft, token.Data, compiledRight)
 	case TKN_LOG:
+		left := CompileToken(token.Left, ctx)
+		right := CompileToken(token.Right, ctx)
 		op := ""
+		token.ReturnedType = TYPE_BOOL
 		switch token.Data {
 		case "and":
+			if left == "true" {
+				return right
+			}
+			if right == "true" {
+				return left
+			}
+			if left == "false" || right == "false" {
+				return "false"
+			}
 			op = "&&"
 		case "or":
+			if left == "false" {
+				return right
+			}
+			if right == "false" {
+				return left
+			}
+			if left == "true" || right == "true" {
+				return "true"
+			}
 			op = "||"
 		}
-		token.ReturnedType = TYPE_BOOL
-		return fmt.Sprintf("%v %v %v", CompileToken(token.Left, ctx), op, CompileToken(token.Right, ctx))
+		return fmt.Sprintf("%v %v %v", left, op, right)
 	case TKN_BIT:
 		token.ReturnedType = TYPE_BOOL
 		return fmt.Sprintf("%v %v %v", CompileToken(token.Left, ctx), token.Data, CompileToken(token.Right, ctx))
@@ -595,10 +1123,10 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 			return "nil"
 		case "timestamp":
 			token.ReturnedType = TYPE_NUM
-			return "OSLcastNumber(time.Now().UnixMilli())"
+			return "float64(time.Now().UnixMilli())"
 		case "performance":
 			token.ReturnedType = TYPE_NUM
-			return "OSLcastNumber(time.Now().UnixMicro())"
+			return "float64(time.Now().UnixMicro())"
 		}
 		return varName
 	case TKN_RAW:
@@ -632,6 +1160,17 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 		ctx.Indent--
 		token.ReturnedType = TYPE_OBJ
 		return obj
+	case TKN_TSR:
+		var compiled strings.Builder
+		for _, t := range token.Data.([]*Token) {
+			if t.Type == TKN_STR {
+				compiled.WriteString("+\"" + t.Data.(string) + "\"")
+			} else {
+				compiled.WriteString("+" + CompileToken(t, ctx))
+			}
+		}
+		token.ReturnedType = TYPE_STR
+		return strings.TrimSpace(strings.TrimPrefix(compiled.String(), "+"))
 	case TKN_RMT:
 		var path []*Token
 		if token.Data != nil {
@@ -692,11 +1231,21 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 				}
 			}
 			returns := " "
-			if len(params) > 1 {
+			// Inline functions without explicit return type always return any
+			if len(params) > 1 && token.Returns == "" {
+				returns = "any "
+			} else if len(params) > 1 {
 				returns = mapOSLTypeToGo(token.Returns) + " "
+			} else if len(params) <= 1 {
+				returns = "any "
 			}
 			out := fmt.Sprintf("(func(%v) %v{\n", strings.TrimSuffix(paramString.String(), ", "), returns)
+
 			ctx.Indent++
+			ctx.ScopeLevel++
+			savedDeclaredVars := ctx.DeclaredVars
+			ctx.DeclaredVars = make(map[string]bool)
+
 			if len(params) > 1 {
 				blk := params[1]
 				if blk != nil {
@@ -705,11 +1254,20 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 						inner = AddIndent("OSLself := OSLself\n", ctx.Indent*2) + inner
 						ctx.selfUsed = false
 					}
+
+					// If no return statement and return type is any, add return nil
+					hasReturn := hasReturnStatement(blk.Data.([][]*Token))
+					if returns == "any " && !hasReturn {
+						inner += AddIndent("return nil\n", ctx.Indent*2)
+					}
 					out += inner
 				}
 			}
 			out += AddIndent("})", ctx.Indent*2-2)
+
+			ctx.DeclaredVars = savedDeclaredVars
 			ctx.Indent--
+			ctx.ScopeLevel--
 			return out
 		case "worker":
 			if len(token.Parameters) > 0 {
@@ -750,6 +1308,11 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 			if len(token.Parameters) > 0 {
 				token.ReturnedType = TYPE_NUM
 				return fmt.Sprintf("OSLmax(%v, %v)", CompileToken(token.Parameters[0], ctx), CompileToken(token.Parameters[1], ctx))
+			}
+		case "random":
+			if len(token.Parameters) >= 2 {
+				token.ReturnedType = TYPE_NUM
+				return fmt.Sprintf("OSLrandom(%v, %v)", CompileToken(token.Parameters[0], ctx), CompileToken(token.Parameters[1], ctx))
 			}
 		case "raw":
 			if len(token.Parameters) > 0 {
@@ -831,7 +1394,29 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 						}
 					}
 					if previous.ReturnedType == TYPE_OBJ {
-						out = fmt.Sprintf("%v[OSLcastString(%v)]", out, name)
+						out = fmt.Sprintf("%v[OSLtoString(%v)]", out, name)
+					}
+					typeName, isType := previous.Data.(string)
+					if isType {
+						if _, isBuiltin := oslTypes[typeName]; isBuiltin {
+							if methods, hasMethods := ctx.builtinTypeMethods[typeName]; hasMethods {
+								if methodDef, hasCustomMethod := methods[name]; hasCustomMethod {
+									capitalizedTypeName := strings.ToUpper(string(typeName[0])) + typeName[1:]
+									capitalizedMethodName := strings.ToUpper(string(name[0])) + name[1:]
+									funcName := fmt.Sprintf("OSLMET%s%s", capitalizedTypeName, capitalizedMethodName)
+									out = fmt.Sprintf("%v(%v", funcName, out)
+									for _, p := range part.Parameters {
+										out += ", " + CompileToken(p, ctx)
+									}
+									out += ")"
+									part.ReturnedType = methodDef.ReturnType
+									if part.ReturnedType != "" {
+										token.ReturnedType = part.ReturnedType
+									}
+									break
+								}
+							}
+						}
 					}
 					out = fmt.Sprintf("OSLgetItem(%v, \"%v\")", out, name)
 				}
@@ -840,12 +1425,51 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 				for i, p := range part.Parameters {
 					params[i] = CompileToken(p, ctx)
 				}
+
+				if previous.ReturnedType != "" {
+					builtinName := ""
+					switch previous.ReturnedType {
+					case TYPE_STR:
+						builtinName = "string"
+					case TYPE_INT:
+						builtinName = "int"
+					case TYPE_NUM:
+						builtinName = "number"
+					case TYPE_BOOL:
+						builtinName = "boolean"
+					case TYPE_OBJ:
+						builtinName = "object"
+					case TYPE_ARR:
+						builtinName = "array"
+					}
+					if builtinName != "" {
+						if methods, hasMethods := ctx.builtinTypeMethods[builtinName]; hasMethods {
+							if methodDef, hasCustomMethod := methods[name]; hasCustomMethod {
+								capitalizedTypeName := strings.ToUpper(string(builtinName[0])) + builtinName[1:]
+								capitalizedMethodName := strings.ToUpper(string(name[0])) + name[1:]
+								funcName := fmt.Sprintf("OSLMET%s%s", capitalizedTypeName, capitalizedMethodName)
+								out = fmt.Sprintf("%v(%v", funcName, out)
+								for _, p := range part.Parameters {
+									out += ", " + CompileToken(p, ctx)
+								}
+								out += ")"
+								part.ReturnedType = methodDef.ReturnType
+								if part.ReturnedType != "" {
+									token.ReturnedType = part.ReturnedType
+								}
+								previous = part
+								continue
+							}
+						}
+					}
+				}
+
 				switch name {
 				case "call":
 					out = fmt.Sprintf("OSLcallFunc(%v.%v, %v)", out, part.Parameters[0].Data, JsonStringify(params[1:]))
 				case "toStr":
 					part.ReturnedType = TYPE_STR
-					out = fmt.Sprintf("OSLcastString(%v)", out)
+					out = fmt.Sprintf("OSLtoString(%v)", out)
 				case "toInt":
 					part.ReturnedType = TYPE_INT
 					out = fmt.Sprintf("OSLcastInt(%v)", out)
@@ -895,13 +1519,19 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 					out = fmt.Sprintf("string(rune(OSLcastInt(%v)))", out)
 				case "ord":
 					part.ReturnedType = TYPE_INT
-					out = fmt.Sprintf("int(OSLcastString(%v)[0])", out)
+					out = fmt.Sprintf("int(OSLtoString(%v)[0])", out)
 				case "toLower":
 					part.ReturnedType = TYPE_STR
 					out = fmt.Sprintf("strings.ToLower(%v)", out)
 				case "toUpper":
 					part.ReturnedType = TYPE_STR
 					out = fmt.Sprintf("strings.ToUpper(%v)", out)
+				case "onKeyDown":
+					part.ReturnedType = TYPE_BOOL
+					out = "false" // Stub implementation
+				case "isKeyDown":
+					part.ReturnedType = TYPE_BOOL
+					out = fmt.Sprintf("window.KeyPressed(%v)", out)
 				case "getKeys":
 					part.ReturnedType = TYPE_ARR
 					out = fmt.Sprintf("OSLgetKeys(%v)", out)
@@ -1020,10 +1650,30 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 				case "item":
 					if len(params) > 0 {
 						if previous.ReturnedType == TYPE_OBJ {
-							out = fmt.Sprintf("%v[OSLcastString(%v)]", out, params[0])
+							out = fmt.Sprintf("%v[OSLtoString(%v)]", out, params[0])
 						}
 						out = fmt.Sprintf("OSLgetItem(%v, %v)", out, params[0])
 					}
+				case "sin":
+					part.ReturnedType = TYPE_NUM
+					out = fmt.Sprintf("math.Sin((OSLcastNumber(%v) * math.Pi) / 180)", out)
+				case "cos":
+					part.ReturnedType = TYPE_NUM
+					out = fmt.Sprintf("math.Cos((OSLcastNumber(%v) * math.Pi) / 180)", out)
+				case "tan":
+					part.ReturnedType = TYPE_NUM
+					out = fmt.Sprintf("math.Tan((OSLcastNumber(%v) * math.Pi) / 180)", out)
+				case "clamp":
+					if len(params) >= 2 {
+						part.ReturnedType = TYPE_NUM
+						out = fmt.Sprintf("OSLmin(OSLmax(%v, %v), %v)", out, params[0], params[1])
+					}
+				case "abs":
+					part.ReturnedType = TYPE_NUM
+					out = fmt.Sprintf("math.Abs(OSLcastNumber(%v))", out)
+				case "sqrt":
+					part.ReturnedType = TYPE_NUM
+					out = fmt.Sprintf("math.Sqrt(OSLcastNumber(%v))", out)
 				default:
 					if len(part.Parameters) == 0 {
 						out = fmt.Sprintf("%v.%v()", out, name)
@@ -1036,6 +1686,14 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 		}
 		token.ReturnedType = previous.ReturnedType
 		return out
+	case TKN_QST:
+		if token.Left == nil || token.Right == nil || token.Right2 == nil {
+			return "nil"
+		}
+		left := CompileToken(token.Left, ctx)
+		right := CompileToken(token.Right, ctx)
+		right2 := CompileToken(token.Right2, ctx)
+		return fmt.Sprintf("func() any { if %v { return %v } else { return %v } }()", left, right, right2)
 	case TKN_UNK:
 		if data, ok := token.Data.(string); ok {
 			if matched, _ := regexp.MatchString(`^[a-zA-Z_][a-zA-Z0-9_]*$`, data); matched {
@@ -1064,6 +1722,9 @@ func CompileCmd(cmd []*Token, ctx *VariableContext) string {
 		var condition string
 		if len(cmd) > 1 {
 			condition = CompileToken(cmd[1], ctx)
+		}
+		if cmd[1].ReturnedType != TYPE_BOOL {
+			condition = fmt.Sprintf("OSLcastBool(%v)", condition)
 		}
 
 		out += fmt.Sprintf("if %v {\n", condition)
@@ -1114,9 +1775,43 @@ func CompileCmd(cmd []*Token, ctx *VariableContext) string {
 		var iteratorVar string = "i_" + RandomString(5)
 		loopNumber := CompileToken(cmd[1], ctx)
 		blk := cmd[2]
+		var blockData [][]*Token
+		if blkData, ok := blk.Data.([][]*Token); ok {
+			blockData = blkData
+		} else if dataStr, ok := blk.Data.(string); ok {
+			blockData = scriptToAst(dataStr)
+		} else if singleToken, ok := blk.Data.([]*Token); ok {
+			blockData = append(blockData, singleToken)
+		}
 		ctx.Indent++
-		out += fmt.Sprintf("for %v := 1; %v <= %v; %v++ {\n", iteratorVar, iteratorVar, loopNumber, iteratorVar)
-		out += CompileBlock(blk.Data.([][]*Token), ctx)
+
+		var loopCondition string
+		returnType := cmd[1].ReturnedType
+
+		// Try to get variable type from context if it's a variable reference
+		if cmd[1].Type == TKN_VAR {
+			if varName, ok := cmd[1].Data.(string); ok {
+				if varType, exists := ctx.VariableTypes[varName]; exists {
+					if varType == "float64" {
+						returnType = TYPE_NUM
+					}
+				}
+			}
+		}
+
+		switch returnType {
+		case TYPE_NUM:
+			loopCondition = fmt.Sprintf("float64(%v) <= %v", iteratorVar, loopNumber)
+			loopNumber = fmt.Sprintf("int(%v)", loopNumber)
+		case TYPE_STR, TYPE_ARR, TYPE_OBJ:
+			loopCondition = fmt.Sprintf("%v <= OSLround(%v)", iteratorVar, loopNumber)
+			loopNumber = fmt.Sprintf("OSLround(%v)", loopNumber)
+		default:
+			loopCondition = fmt.Sprintf("%v <= %v", iteratorVar, loopNumber)
+		}
+
+		out += fmt.Sprintf("for %v := 1; %v; %v++ {\n", iteratorVar, loopCondition, iteratorVar)
+		out += CompileBlock(blockData, ctx)
 		ctx.Indent--
 		out += AddIndent("}", ctx.Indent*2)
 	case "for":
@@ -1129,6 +1824,14 @@ func CompileCmd(cmd []*Token, ctx *VariableContext) string {
 		}
 		loopNumber := CompileToken(cmd[2], ctx)
 		blk := cmd[3]
+		var blockData [][]*Token
+		if blkData, ok := blk.Data.([][]*Token); ok {
+			blockData = blkData
+		} else if dataStr, ok := blk.Data.(string); ok {
+			blockData = scriptToAst(dataStr)
+		} else if singleToken, ok := blk.Data.([]*Token); ok {
+			blockData = append(blockData, singleToken)
+		}
 		ctx.Indent++
 		returnType := cmd[2].ReturnedType
 		if returnType == TYPE_NUM {
@@ -1137,7 +1840,7 @@ func CompileCmd(cmd []*Token, ctx *VariableContext) string {
 			loopNumber = fmt.Sprintf("OSLround(%v)", loopNumber)
 		}
 		out += fmt.Sprintf("for %v := 1; %v <= %v; %v++ {\n", iteratorVar, iteratorVar, loopNumber, iteratorVar)
-		out += CompileBlock(blk.Data.([][]*Token), ctx)
+		out += CompileBlock(blockData, ctx)
 		ctx.Indent--
 		out += AddIndent("}", ctx.Indent*2)
 	case "while":
@@ -1157,7 +1860,7 @@ func CompileCmd(cmd []*Token, ctx *VariableContext) string {
 		out += CompileBlock(blk.Data.([][]*Token), ctx)
 		ctx.Indent--
 		out += AddIndent("}", ctx.Indent*2)
-	case "log":
+	case "log", "say":
 		if len(cmd) < 2 {
 			panic("Log command requires at least 1 parameter")
 		}
@@ -1172,6 +1875,19 @@ func CompileCmd(cmd []*Token, ctx *VariableContext) string {
 			}
 		}
 		out += ")"
+	case "window":
+		params := []string{}
+		for i := 1; i < len(cmd); i++ {
+			params = append(params, CompileToken(cmd[i], ctx))
+		}
+		switch cmd[1].Data {
+		case "dimensions":
+			out += AddIndent("window.resize("+params[1]+", "+params[2]+")\n", ctx.Indent*2)
+		case "resizable":
+			out += AddIndent("window.setResizable("+params[1]+")\n", ctx.Indent*2)
+		default:
+			out += "// window " + cmd[1].Data.(string) + " " + strings.Join(params, ", ") + "\n"
+		}
 	case "type":
 		name := cmd[1].Data.(string)
 		oslTypes[name] = "*OSL_" + name
@@ -1189,8 +1905,75 @@ func CompileCmd(cmd []*Token, ctx *VariableContext) string {
 				switch line[0].Type {
 				case TKN_ASI:
 					val := line[0]
+					if val.Right != nil && val.Left != nil &&
+						val.Right.Type == TKN_FNC && val.Left.Type == TKN_VAR &&
+						val.Right.Data == "function" && ctx.Indent == 0 {
+						ctx.Indent++
+						ctx.ScopeLevel++
+
+						savedDeclaredVars := ctx.DeclaredVars
+						ctx.DeclaredVars = make(map[string]bool)
+
+						params_string := ""
+						if len(val.Right.Parameters) > 0 {
+							params := val.Right.Parameters
+							args := strings.Split(params[0].Data.(string), ",")
+							for i, arg := range args {
+								args[i] = strings.TrimSpace(arg)
+								if args[i] == "" {
+									continue
+								}
+								parts := strings.Split(args[i], " ")
+								typeName := "any"
+								varName := args[i]
+								if len(parts) > 1 {
+									typeName = mapOSLTypeToGo(parts[1])
+									varName = parts[0]
+								}
+
+								ctx.DeclaredVars[varName] = true
+								params_string += fmt.Sprintf("%v %v, ", varName, typeName)
+							}
+						}
+						params_string = strings.TrimSuffix(params_string, ", ")
+						returns := ""
+						if val.Right.Returns != "" {
+							returns = mapOSLTypeToGo(val.Right.Returns) + " "
+						}
+
+						var blockData [][]*Token = nil
+						funcBody := ""
+						if len(val.Right.Parameters) > 1 && val.Right.Parameters[1] != nil {
+							if bd, ok := val.Right.Parameters[1].Data.([][]*Token); ok {
+								blockData = bd
+								funcBody = CompileBlock(blockData, ctx)
+								if ctx.selfUsed {
+									params_string = "OSLself any, " + params_string
+									ctx.selfUsed = false
+								}
+							}
+						}
+
+						hasReturn := hasReturnStatement(blockData)
+						if returns == "" && hasReturn {
+							returns = "any "
+						}
+
+						if hasReturn && !strings.Contains(funcBody, "return") {
+							funcBody += AddIndent("return nil\n", ctx.Indent*2)
+						}
+
+						out += fmt.Sprintf("func (OSLself *OSL_%v) %v%v {\n", cmd[1].Data, params_string, returns)
+						out += funcBody + "\n}\n"
+
+						ctx.DeclaredVars = savedDeclaredVars
+						ctx.Indent--
+						ctx.ScopeLevel--
+						break
+					}
+					val = line[0]
 					varName := val.Left.Data.(string)
-					if val.Right.Type == TKN_FNC && val.Right.Data == "function" {
+					if val.Right != nil && val.Right.Type == TKN_FNC && val.Right.Data == "function" {
 						inlines[varName] = val.Right
 						params := val.Right.Parameters[0].Data.(string)
 						parts := strings.Split(params, ",")
@@ -1218,7 +2001,7 @@ func CompileCmd(cmd []*Token, ctx *VariableContext) string {
 			ctx.Indent--
 			out += "}\nfunc OSL_new_" + name + "() *OSL_" + name + " {\n"
 			ctx.Indent++
-			out += AddIndent("var OSLself = &OSL_"+name+"{\n", ctx.Indent*2)
+			out += AddIndent("OSLself = &OSL_"+name+"{\n", ctx.Indent*2)
 			ctx.Indent++
 			for varName, val := range defaults {
 				out += AddIndent(fmt.Sprintf("%v: %v,\n", varName, CompileToken(val, ctx)), ctx.Indent*2)
@@ -1258,6 +2041,96 @@ func CompileCmd(cmd []*Token, ctx *VariableContext) string {
 			panic("Case command requires at least 1 parameter")
 		}
 		out += "case " + CompileToken(cmd[1], ctx) + ":\n"
+	case "def":
+		if len(cmd) < 2 {
+			panic("Def command requires at least 1 parameter")
+		}
+		cmdName := cmd[1]
+
+		funcName := ""
+		if cmdName.Type == TKN_STR {
+			// This is a custom command
+			if name, ok := cmdName.Data.(string); ok {
+				funcName = "OSLCMD_" + name
+				ctx.CustomCommands[name] = true
+			}
+		} else if name, ok := cmdName.Data.(string); ok {
+			// This is a regular function
+			funcName = name
+		}
+
+		ctx.Indent++
+		ctx.ScopeLevel++
+
+		savedDeclaredVars := ctx.DeclaredVars
+		ctx.DeclaredVars = make(map[string]bool)
+
+		var paramString strings.Builder
+		if len(cmd) > 2 {
+			cmdParams := cmd[2]
+			switch cmdParams.Type {
+			case TKN_STR:
+				paramString.WriteString(fmt.Sprintf("%v any", cmdParams.Data))
+				if name, ok := cmdName.Data.(string); ok {
+					ctx.DeclaredVars[name] = true
+				}
+			case TKN_MTV:
+				fields := cmdParams.Data.([]*Token)
+				for i, f := range fields {
+					if i > 0 {
+						paramString.WriteString(", ")
+					}
+					if s, ok := f.Data.(string); ok {
+						parts := strings.SplitN(strings.TrimSpace(s), " ", 2)
+						varName := s
+						goType := "any"
+						if len(parts) == 2 {
+							oslType := parts[0]
+							varName = parts[1]
+							goType = mapOSLTypeToGo(oslType)
+							ctx.DeclaredVars[varName] = true
+							ctx.VariableTypes[varName] = goType
+						} else {
+							ctx.DeclaredVars[s] = true
+						}
+						paramString.WriteString(fmt.Sprintf("%v %v", varName, goType))
+					}
+				}
+			}
+		}
+
+		var funcBody string
+		var blockData [][]*Token = nil
+		if len(cmd) > 3 {
+			cmdBody := cmd[3]
+			if cmdBody.Type == TKN_BLK {
+				if blk, ok := cmdBody.Data.([][]*Token); ok {
+					blockData = blk
+					funcBody = CompileBlock(blk, ctx)
+				}
+			}
+		} else if len(cmd) > 2 && cmd[2].Type == TKN_BLK {
+			if blk, ok := cmd[2].Data.([][]*Token); ok {
+				blockData = blk
+				funcBody = CompileBlock(blk, ctx)
+			}
+		}
+
+		hasReturn := hasReturnStatement(blockData)
+		funcResult := ""
+		if hasReturn {
+			funcResult = "any"
+		}
+
+		if hasReturn && !strings.Contains(funcBody, "return") {
+			funcBody += AddIndent("return nil\n", ctx.Indent*2)
+		}
+
+		out = "func " + funcName + "(" + paramString.String() + ") " + funcResult + " {\n" + funcBody + "}"
+
+		ctx.DeclaredVars = savedDeclaredVars
+		ctx.Indent--
+		ctx.ScopeLevel--
 	case "import":
 		if len(cmd) < 2 {
 			panic("Import command requires at least 1 parameter")
@@ -1293,7 +2166,33 @@ func CompileCmd(cmd []*Token, ctx *VariableContext) string {
 		if len(cmd) != 3 {
 			panic("Goto command requires 2 parameters")
 		}
-		out += "OSLdrawctx.Goto(" + CompileToken(cmd[1], ctx) + ", " + CompileToken(cmd[2], ctx) + ")"
+		x := CompileToken(cmd[1], ctx)
+		y := CompileToken(cmd[2], ctx)
+		out += "OSLdrawctx.Goto(" + x + ", " + y + ")"
+	case "change_x":
+		if len(cmd) != 2 {
+			panic("Change_x command requires 1 parameter")
+		}
+		out += "OSLdrawctx.Change(" + CompileToken(cmd[1], ctx) + ", 0)"
+	case "change_y":
+		if len(cmd) != 2 {
+			panic("Change_y command requires 1 parameter")
+		}
+		out += "OSLdrawctx.Change(0, " + CompileToken(cmd[1], ctx) + ")"
+	case "change":
+		if len(cmd) != 3 {
+			panic("Change command requires 2 parameters")
+		}
+		out += "OSLdrawctx.Change(" + CompileToken(cmd[1], ctx) + ", " + CompileToken(cmd[2], ctx) + ")"
+	case "loc":
+		if len(cmd) != 5 {
+			panic("Loc command requires 4 parameters")
+		}
+		a := CompileToken(cmd[1], ctx)
+		b := CompileToken(cmd[2], ctx)
+		c := CompileToken(cmd[3], ctx)
+		d := CompileToken(cmd[4], ctx)
+		out += "OSLdrawctx.Loc(" + a + ", " + b + ", " + c + ", " + d + ")"
 	case "square":
 		if len(cmd) < 3 {
 			panic("Square command requires at least 2 parameters")
@@ -1305,7 +2204,7 @@ func CompileCmd(cmd []*Token, ctx *VariableContext) string {
 		out += ")"
 	case "icon":
 		if len(cmd) != 3 {
-			panic("Icon command requires 2 parameters")
+			panic("Icon command requires 2 parameters, got: " + cmd[0].Source)
 		}
 		out += "OSLdrawctx.Icon(" + CompileToken(cmd[1], ctx) + ", " + CompileToken(cmd[2], ctx) + ")"
 	case "text":
@@ -1313,20 +2212,80 @@ func CompileCmd(cmd []*Token, ctx *VariableContext) string {
 			panic("Text command requires at least 2 parameters")
 		}
 		out += "OSLdrawctx.Text(" + CompileToken(cmd[1], ctx) + ", " + CompileToken(cmd[2], ctx) + ")"
-	case "mainloop:":
-		if len(cmd) != 3 {
-			panic("Mainloop command requires 2 parameters")
+	case "direction":
+		if len(cmd) != 2 {
+			panic("Direction command requires 1 parameter")
 		}
-		winVar := cmd[1].Data.(string)
-		out += winVar + ".Run(func(" + winVar + " *OSLWindow) {\n"
-		out += AddIndent(CompileBlock(cmd[2].Data.([][]*Token), ctx), ctx.Indent*2)
-		out += "})"
+		out += "OSLdrawctx.Direction(" + CompileToken(cmd[1], ctx) + ")"
+	case "turnright":
+		if len(cmd) != 2 {
+			panic("Turnright command requires 1 parameter")
+		}
+		angle := CompileToken(cmd[1], ctx)
+		out += "OSLdrawctx.Turnright(" + angle + ")"
+	case "turnleft":
+		if len(cmd) != 2 {
+			panic("Turnleft command requires 1 parameter")
+		}
+		angle := CompileToken(cmd[1], ctx)
+		out += "OSLdrawctx.Turnleft(" + angle + ")"
+	case "pointat":
+		if len(cmd) != 3 {
+			panic("Pointat command requires 2 parameters")
+		}
+		out += "OSLdrawctx.Pointat(" + CompileToken(cmd[1], ctx) + ", " + CompileToken(cmd[2], ctx) + ")"
 	default:
-		out += cmd[0].Data.(string)
-		if len(cmd) > 1 {
-			out += " "
+		cmdName := ""
+		if name, ok := cmd[0].Data.(string); ok {
+			cmdName = name
+		}
+
+		// Check if it's a custom command
+		if ctx.CustomCommands[cmdName] {
+			out += "OSLCMD_" + cmdName + "("
 			for i := 1; i < len(cmd); i++ {
 				out += CompileToken(cmd[i], ctx)
+				if i < len(cmd)-1 {
+					out += ", "
+				}
+			}
+			out += ")"
+		} else {
+			// Unknown command
+			cmdName := cmd[0].Data.(string)
+
+			// Go keywords that should not have parentheses
+			goKeywords := map[string]bool{
+				"if": true, "else": true, "for": true, "while": true,
+				"switch": true, "case": true, "default": true,
+				"break": true, "continue": true, "return": true,
+				"goto": true, "defer": true, "go": true,
+			}
+
+			if goKeywords[cmdName] {
+				// Go statement - no parentheses
+				out += cmdName
+				if len(cmd) > 1 {
+					out += " "
+					for i := 1; i < len(cmd); i++ {
+						out += CompileToken(cmd[i], ctx)
+						if i < len(cmd)-1 {
+							out += " "
+						}
+					}
+				}
+			} else {
+				// Function call - with parentheses
+				out += cmdName + "("
+				if len(cmd) > 1 {
+					for i := 1; i < len(cmd); i++ {
+						out += CompileToken(cmd[i], ctx)
+						if i < len(cmd)-1 {
+							out += ", "
+						}
+					}
+				}
+				out += ")"
 			}
 		}
 	}

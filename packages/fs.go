@@ -6,7 +6,7 @@
 type FS struct{}
 
 func (FS) ReadFile(path any) string {
-	data, err := os.ReadFile(OSLcastString(path))
+	data, err := os.ReadFile(OSLtoString(path))
 	if err != nil {
 		return ""
 	}
@@ -14,7 +14,7 @@ func (FS) ReadFile(path any) string {
 }
 
 func (FS) ReadFileBytes(path any) []byte {
-	data, err := os.ReadFile(OSLcastString(path))
+	data, err := os.ReadFile(OSLtoString(path))
 	if err != nil {
 		return []byte{}
 	}
@@ -22,17 +22,17 @@ func (FS) ReadFileBytes(path any) []byte {
 }
 
 func (FS) WriteFile(path any, data any) bool {
-	err := os.WriteFile(OSLcastString(path), []byte(OSLcastString(data)), 0644)
+	err := os.WriteFile(OSLtoString(path), []byte(OSLtoString(data)), 0644)
 	return err == nil
 }
 
 func (FS) Rename(oldPath any, newPath any) bool {
-	err := os.Rename(OSLcastString(oldPath), OSLcastString(newPath))
+	err := os.Rename(OSLtoString(oldPath), OSLtoString(newPath))
 	return err == nil
 }
 
 func (FS) Exists(path any) bool {
-	_, err := os.Stat(OSLcastString(path))
+	_, err := os.Stat(OSLtoString(path))
 	return err == nil
 }
 
@@ -55,18 +55,18 @@ func (FS) Remove(path any) bool {
 }
 
 func (FS) Mkdir(path any) bool {
-	err := os.Mkdir(OSLcastString(path), 0755)
+	err := os.Mkdir(OSLtoString(path), 0755)
 	return err == nil
 }
 
 func (FS) MkdirAll(path any) bool {
-	err := os.MkdirAll(OSLcastString(path), 0755)
+	err := os.MkdirAll(OSLtoString(path), 0755)
 	return err == nil
 }
 
 func (FS) CopyDir(srcPath any, dstPath any) bool {
-	src := OSLcastString(srcPath)
-	dst := OSLcastString(dstPath)
+	src := OSLtoString(srcPath)
+	dst := OSLtoString(dstPath)
 
 	entries, err := os.ReadDir(src)
 	if err != nil {
@@ -118,7 +118,7 @@ func (FS) CopyDir(srcPath any, dstPath any) bool {
 }
 
 func (FS) ReadDir(path any) []any {
-	files, err := os.ReadDir(OSLcastString(path))
+	files, err := os.ReadDir(OSLtoString(path))
 	if err != nil {
 		return []any{}
 	}
@@ -130,7 +130,7 @@ func (FS) ReadDir(path any) []any {
 }
 
 func (FS) ReadDirAll(path any) []map[string]any {
-	dir := OSLcastString(path)
+	dir := OSLtoString(path)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return []map[string]any{}
@@ -151,7 +151,7 @@ func (FS) ReadDirAll(path any) []map[string]any {
 }
 
 func (FS) WalkDir(path any, fn func(path string, file map[string]any, control map[string]any)) {
-	dir := OSLcastString(path)
+	dir := OSLtoString(path)
 	filepath.WalkDir(dir, func(p string, entry os.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -186,7 +186,7 @@ func (FS) WalkDir(path any, fn func(path string, file map[string]any, control ma
 }
 
 func (FS) IsDir(path any) bool {
-	info, err := os.Stat(OSLcastString(path))
+	info, err := os.Stat(OSLtoString(path))
 	if err != nil {
 		return false
 	}
@@ -202,37 +202,37 @@ func (FS) Getwd() string {
 }
 
 func (FS) Chdir(path any) bool {
-	err := os.Chdir(OSLcastString(path))
+	err := os.Chdir(OSLtoString(path))
 	return err == nil
 }
 
 func (FS) JoinPath(path ...any) string {
 	stringPath := make([]string, len(path))
 	for i, p := range path {
-		stringPath[i] = OSLcastString(p)
+		stringPath[i] = OSLtoString(p)
 	}
 	return filepath.Join(stringPath...)
 }
 
 func (FS) GetBase(path any) string {
-	return filepath.Base(OSLcastString(path))
+	return filepath.Base(OSLtoString(path))
 }
 
 func (FS) GetDir(path any) string {
-	return filepath.Dir(OSLcastString(path))
+	return filepath.Dir(OSLtoString(path))
 }
 
 func (FS) GetExt(path any) string {
-	return filepath.Ext(OSLcastString(path))
+	return filepath.Ext(OSLtoString(path))
 }
 
 func (FS) GetParts(path any) []any {
-	stringPath := OSLcastString(path)
+	stringPath := OSLtoString(path)
 	return []any{filepath.Base(stringPath), filepath.Dir(stringPath), filepath.Ext(stringPath)}
 }
 
 func (FS) GetSize(path any) float64 {
-	info, err := os.Stat(OSLcastString(path))
+	info, err := os.Stat(OSLtoString(path))
 	if err != nil {
 		return 0
 	}
@@ -240,7 +240,7 @@ func (FS) GetSize(path any) float64 {
 }
 
 func (FS) GetModTime(path any) float64 {
-	info, err := os.Stat(OSLcastString(path))
+	info, err := os.Stat(OSLtoString(path))
 	if err != nil {
 		return 0.0
 	}
@@ -248,7 +248,7 @@ func (FS) GetModTime(path any) float64 {
 }
 
 func (FS) GetStat(path any) map[string]any {
-	info, err := os.Stat(OSLcastString(path))
+	info, err := os.Stat(OSLtoString(path))
 	if err != nil {
 		return map[string]any{"success": false}
 	}
@@ -266,7 +266,7 @@ func (FS) GetStat(path any) map[string]any {
 }
 
 func (FS) EvalSymlinks(path any) string {
-	pathStr := OSLcastString(path)
+	pathStr := OSLtoString(path)
 	absPath, err := filepath.EvalSymlinks(pathStr)
 	if err != nil {
 		return ""

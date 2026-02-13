@@ -3,18 +3,6 @@
 // author: Mist
 // requires: github.com/faiface/pixel, github.com/faiface/pixel/pixelgl, github.com/faiface/pixel/imdraw, image, image/color
 
-type OSLwinpkg struct{}
-
-var mouse_x float64 = 0.0
-var mouse_y float64 = 0.0
-var mouse_down = false
-
-type OSLWindow struct {
-	win  *pixelgl.Window
-	cfg  pixelgl.WindowConfig
-	loop func(w *OSLWindow)
-}
-
 type OSLwinRender struct {
 	win        *pixelgl.Window
 	color      color.Color
@@ -22,15 +10,59 @@ type OSLwinRender struct {
 	currentX   float64
 	currentY   float64
 	thickness  float64
+	direction  float64
+	window     *OSLWindow
 }
+
+type OSLWindow struct {
+	win  *pixelgl.Window
+	cfg  pixelgl.WindowConfig
+	loop func(w *OSLWindow)
+}
+
+type OSLwinpkg struct {
+	configWidth  float64
+	configHeight float64
+	width        float64
+	height       float64
+	renderer     *OSLwinRender
+	window       *OSLWindow
+}
+
+var mouse_x float64 = 0.0
+var mouse_y float64 = 0.0
+var mouse_down = false
+var direction float64 = 0.0
+var x_position float64 = 0.0
+var y_position float64 = 0.0
+var clicked = false
+var window_width float64 = 0.0
+var window_height float64 = 0.0
 
 var OSLdrawctx *OSLwinRender
 
-func (OSLwinpkg) Create(setup func(w *OSLWindow)) {
+var window = &OSLwinpkg{
+	width:  800,
+	height: 600,
+}
+
+func (pkg *OSLwinpkg) Create(setup func(w *OSLWindow)) {
 	pixelgl.Run(func() {
+		width := pkg.configWidth
+		height := pkg.configHeight
+		if width <= 0 {
+			width = 800
+		}
+		if height <= 0 {
+			height = 600
+		}
+
+		pkg.width = width
+		pkg.height = height
+
 		cfg := pixelgl.WindowConfig{
 			Title:     "Untitled",
-			Bounds:    pixel.R(0, 0, 800, 600),
+			Bounds:    pixel.R(0, 0, width, height),
 			VSync:     true,
 			Resizable: true,
 		}
@@ -52,7 +84,11 @@ func (OSLwinpkg) Create(setup func(w *OSLWindow)) {
 			currentX:  0,
 			currentY:  0,
 			thickness: 1,
+			direction: 0,
+			window:    w,
 		}
+
+		pkg.renderer = r
 
 		rectImg := image.NewRGBA(image.Rect(0, 0, 1, 1))
 		rectImg.Set(0, 0, color.White)
@@ -69,6 +105,11 @@ func (OSLwinpkg) Create(setup func(w *OSLWindow)) {
 			winBounds := w.win.Bounds()
 			winWidth := winBounds.Max.X
 			winHeight := winBounds.Max.Y
+
+			pkg.width = winWidth
+			pkg.height = winHeight
+			window_width = winWidth
+			window_height = winHeight
 
 			mouse_x = mousePos.X - (winWidth / 2)
 			mouse_y = mousePos.Y - (winHeight / 2)
@@ -117,23 +158,31 @@ func (w *OSLWindow) SetTitle(title string) {
 	}
 }
 
-func (w *OSLWindow) Resize(width, height float64) {
-	w.cfg.Bounds = pixel.R(0, 0, width, height)
+func (w *OSLWindow) resize(width, height any) {
+	w.cfg.Bounds = pixel.R(0, 0, OSLcastNumber(width), OSLcastNumber(height))
 	if w.win != nil {
 		w.win.SetBounds(w.cfg.Bounds)
 	}
 }
 
-func (w *OSLWindow) Goto(x, y int) {
-	if w.win != nil {
-		w.win.SetPos(pixel.V(float64(x), float64(y)))
+func (w *OSLWindow) setResizable(resizable bool) {
+	return
+}
+
+func (w *OSLWindow) Goto(x, y any) {
+	if w.win == nil {
+		return
 	}
+	x_position = OSLcastNumber(x)
+	y_position = OSLcastNumber(y)
+	w.win.SetPos(pixel.V(x_position, y_position))
 }
 
 func (w *OSLWindow) Clear(col color.Color) {
-	if w.win != nil {
-		w.win.Clear(col)
+	if w.win == nil {
+		return
 	}
+	w.win.Clear(col)
 }
 
 func (w *OSLWindow) Update() {
@@ -142,23 +191,33 @@ func (w *OSLWindow) Update() {
 	}
 }
 
-func (w *OSLWindow) Closed() bool {
-	return w.win == nil || w.win.Closed()
-}
-
-func (w *OSLWindow) Close() {
+func (w *OSLWindow) close() {
 	if w.win != nil {
 		w.win.SetClosed(true)
 	}
 }
 
 func (r *OSLwinRender) Hex(hex any) color.RGBA {
-	h := OSLcastString(hex)
+	h := OSLtoString(hex)
 	var rr, gg, bb, aa uint8 = 0, 0, 0, 255
-	if len(h) == 7 && h[0] == '#' {
-		fmt.Sscanf(h, "#%02x%02x%02x", &rr, &gg, &bb)
-	} else if len(h) == 9 && h[0] == '#' {
-		fmt.Sscanf(h, "#%02x%02x%02x%02x", &rr, &gg, &bb, &aa)
+	if h[0] == '#' {
+		h = h[1:]
+	}
+	if len(h) == 6 {
+		fmt.Sscanf(h, "%02x%02x%02x", &rr, &gg, &bb)
+	} else if len(h) == 8 {
+		fmt.Sscanf(h, "%02x%02x%02x%02x", &rr, &gg, &bb, &aa)
+	} else if len(h) == 3 {
+		fmt.Sscanf(h, "%1x%1x%1x", &rr, &gg, &bb)
+		rr *= 17
+		gg *= 17
+		bb *= 17
+	} else if len(h) == 4 {
+		fmt.Sscanf(h, "%1x%1x%1x%1x", &rr, &gg, &bb, &aa)
+		rr *= 17
+		gg *= 17
+		bb *= 17
+		aa *= 17
 	}
 	return color.RGBA{R: rr, G: gg, B: bb, A: aa}
 }
@@ -173,10 +232,59 @@ func (r *OSLwinRender) Goto(x, y float64) {
 	r.currentY = y
 }
 
-func (r *OSLwinRender) Rect(width, height, rounding float64) {
+func (w *OSLwinRender) Loc(a, b, c, d any) {
+	numA := OSLcastNumber(a)
+	numB := OSLcastNumber(b)
+	numC := OSLcastNumber(c)
+	numD := OSLcastNumber(d)
+
+	w.Goto((window.width/-numA)+numC, (window.height/numB)+numD)
+}
+
+func (r *OSLwinRender) LineTo(endX, endY float64) {
+	if r.win == nil {
+		return
+	}
+
+	winBounds := r.win.Bounds()
+	winWidth := winBounds.Max.X
+	winHeight := winBounds.Max.Y
+
+	startPixelX := (winWidth / 2) + r.currentX
+	startPixelY := (winHeight / 2) + r.currentY
+	endPixelX := (winWidth / 2) + endX
+	endPixelY := (winHeight / 2) + endY
+
+	col := r.color
+	if col == nil {
+		col = color.White
+	}
+
+	thickness := r.thickness
+	if thickness <= 0 {
+		thickness = 1
+	}
+
+	imd := imdraw.New(nil)
+	imd.Color = col
+	imd.EndShape = imdraw.RoundEndShape
+	imd.Push(pixel.V(startPixelX, startPixelY))
+	imd.Push(pixel.V(endPixelX, endPixelY))
+	imd.Line(thickness)
+	imd.Draw(r.win)
+
+	r.currentX = endX
+	r.currentY = endY
+}
+
+func (r *OSLwinRender) Rect(args ...any) {
 	if r.win == nil || r.rectSprite == nil {
 		return
 	}
+
+	width := OSLcastNumber(args[0])
+	height := OSLcastNumber(args[1])
+	rounding := OSLcastNumber(args[2])
 
 	col := r.color
 	if col == nil {
@@ -188,7 +296,7 @@ func (r *OSLwinRender) Rect(width, height, rounding float64) {
 	winHeight := winBounds.Max.Y
 
 	pixelX := (winWidth / 2) + r.currentX
-	pixelY := (winHeight / 2) - r.currentY
+	pixelY := (winHeight / 2) + r.currentY
 
 	centerX := pixelX
 	centerY := pixelY
@@ -218,7 +326,7 @@ func (r *OSLwinRender) Icon(icon any, size float64) {
 		return
 	}
 
-	iconStr := OSLcastString(icon)
+	iconStr := OSLtoString(icon)
 
 	starting_pos := []float64{r.currentX, r.currentY}
 
@@ -289,79 +397,108 @@ func (r *OSLwinRender) Icon(icon any, size float64) {
 	r.currentY = starting_pos[1]
 }
 
+func (r *OSLwinRender) Text(text string, size any) {
+	if r.win == nil {
+		return
+	}
+
+	text = OSLtoString(text)
+	sizeNum := OSLcastNumber(size) * 2
+
+	font := OSLfont
+
+	if font == nil {
+		return
+	}
+
+	startX := r.currentX
+	startY := r.currentY
+
+	for _, char := range text {
+		if char == '\n' {
+			r.currentX = startX
+			r.currentY -= sizeNum
+			continue
+		}
+		if char == ' ' {
+			r.currentX += sizeNum
+			continue
+		}
+		glyph, ok := font[string(char)]
+		if !ok {
+			continue
+		}
+		r.Goto(r.currentX, r.currentY)
+		originalX := r.currentX
+		r.Icon(glyph, sizeNum/40)
+		r.currentX = originalX + sizeNum
+	}
+	r.Goto(r.currentX, startY)
+}
+
 func (r *OSLwinRender) SetThickness(thickness float64) {
 	r.thickness = thickness
 }
 
-func (w *OSLWindow) MousePressed(button pixelgl.Button) bool {
+func (r *OSLwinRender) Change(offsetX, offsetY float64) {
+	r.currentX += offsetX
+	r.currentY += offsetY
+}
+
+func (r *OSLwinRender) Direction(direction float64) {
+	r.direction = direction
+}
+
+var OSLkeyMap = map[string]pixelgl.Button{
+	// Letters
+	"a": pixelgl.KeyA, "b": pixelgl.KeyB, "c": pixelgl.KeyC, "d": pixelgl.KeyD,
+	"e": pixelgl.KeyE, "f": pixelgl.KeyF, "g": pixelgl.KeyG, "h": pixelgl.KeyH,
+	"i": pixelgl.KeyI, "j": pixelgl.KeyJ, "k": pixelgl.KeyK, "l": pixelgl.KeyL,
+	"m": pixelgl.KeyM, "n": pixelgl.KeyN, "o": pixelgl.KeyO, "p": pixelgl.KeyP,
+	"q": pixelgl.KeyQ, "r": pixelgl.KeyR, "s": pixelgl.KeyS, "t": pixelgl.KeyT,
+	"u": pixelgl.KeyU, "v": pixelgl.KeyV, "w": pixelgl.KeyW, "x": pixelgl.KeyX,
+	"y": pixelgl.KeyY, "z": pixelgl.KeyZ,
+
+	// Numbers
+	"0": pixelgl.Key0, "1": pixelgl.Key1, "2": pixelgl.Key2, "3": pixelgl.Key3,
+	"4": pixelgl.Key4, "5": pixelgl.Key5, "6": pixelgl.Key6, "7": pixelgl.Key7,
+	"8": pixelgl.Key8, "9": pixelgl.Key9,
+
+	// Special keys
+	"space":     pixelgl.KeySpace,
+	"enter":     pixelgl.KeyEnter,
+	"escape":    pixelgl.KeyEscape,
+	"esc":       pixelgl.KeyEscape,
+	"backspace": pixelgl.KeyBackspace,
+	"tab":       pixelgl.KeyTab,
+
+	// Modifiers
+	"shift":      pixelgl.KeyLeftShift,
+	"leftshift":  pixelgl.KeyLeftShift,
+	"rightshift": pixelgl.KeyRightShift,
+	"ctrl":       pixelgl.KeyLeftControl,
+	"control":    pixelgl.KeyLeftControl,
+	"leftctrl":   pixelgl.KeyLeftControl,
+	"rightctrl":  pixelgl.KeyRightControl,
+	"alt":        pixelgl.KeyLeftAlt,
+	"leftalt":    pixelgl.KeyLeftAlt,
+	"rightalt":   pixelgl.KeyRightAlt,
+
+	// Arrow keys
+	"up":    pixelgl.KeyUp,
+	"down":  pixelgl.KeyDown,
+	"left":  pixelgl.KeyLeft,
+	"right": pixelgl.KeyRight,
+}
+
+func (w *OSLWindow) KeyPressed(key string) bool {
 	if w.win == nil {
 		return false
 	}
-	return w.win.Pressed(button)
+
+	if btn, ok := OSLkeyMap[strings.ToLower(key)]; ok {
+		return w.win.Pressed(btn)
+	}
+
+	return false
 }
-
-func (w *OSLWindow) MouseJustPressed(button pixelgl.Button) bool {
-	if w.win == nil {
-		return false
-	}
-	return w.win.JustPressed(button)
-}
-
-func (r *OSLwinRender) LineTo(x, y float64) {
-	if r.win == nil {
-		return
-	}
-
-	col := r.color
-	if col == nil {
-		col = color.White
-	}
-
-	winBounds := r.win.Bounds()
-	winWidth := winBounds.Max.X
-	winHeight := winBounds.Max.Y
-
-	startX := (winWidth / 2) + r.currentX
-	startY := (winHeight / 2) + r.currentY
-
-	endX := (winWidth / 2) + x
-	endY := (winHeight / 2) + y
-
-	imd := imdraw.New(nil)
-	imd.Color = col
-	imd.EndShape = imdraw.RoundEndShape
-
-	imd.Push(pixel.V(startX, startY))
-	imd.Push(pixel.V(endX, endY))
-	imd.Line(r.thickness)
-
-	imd.Draw(r.win)
-
-	r.currentX = x
-	r.currentY = y
-}
-
-func (r *OSLwinRender) Text(txt string, size float64) {
-	if r.win == nil {
-		return
-	}
-
-	for _, c := range txt {
-		if c == '\n' {
-			r.currentX = 0
-			r.currentY += size
-			continue
-		}
-
-		if c == '\t' {
-			r.currentX += size * 4
-			continue
-		}
-
-		r.Goto(r.currentX, r.currentY)
-		r.Icon(OSLfont[string(c)], size/30)
-		r.currentX += size
-	}
-}
-
-var window = OSLwinpkg{}

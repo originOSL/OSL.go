@@ -37,7 +37,7 @@ func (OSLCS) NRGBA(r, g, b, a any) color.NRGBA {
 }
 
 func (OSLCS) Hex(hex any) color.RGBA {
-	h := OSLcastString(hex)
+	h := OSLtoString(hex)
 	var r, g, b, a uint8 = 0, 0, 0, 255
 	if len(h) == 7 && h[0] == '#' {
 		fmt.Sscanf(h, "#%02x%02x%02x", &r, &g, &b)

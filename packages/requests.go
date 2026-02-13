@@ -30,7 +30,7 @@ func extractHeadersAndBody(data map[string]any) (headers map[string]string, body
 			if k == "body" {
 				continue
 			}
-			headers[k] = OSLcastString(v)
+			headers[k] = OSLtoString(v)
 		}
 	}
 	return headers, body
@@ -90,19 +90,19 @@ func (h *HTTP) Get(url any, data ...map[string]any) map[string]any {
 	if len(data) > 0 {
 		m = data[0]
 	}
-	return h.doRequest(http.MethodGet, OSLcastString(url), m)
+	return h.doRequest(http.MethodGet, OSLtoString(url), m)
 }
 
 func (h *HTTP) Post(url any, data map[string]any) map[string]any {
-	return h.doRequest(http.MethodPost, OSLcastString(url), data)
+	return h.doRequest(http.MethodPost, OSLtoString(url), data)
 }
 
 func (h *HTTP) Put(url any, data map[string]any) map[string]any {
-	return h.doRequest(http.MethodPut, OSLcastString(url), data)
+	return h.doRequest(http.MethodPut, OSLtoString(url), data)
 }
 
 func (h *HTTP) Patch(url any, data map[string]any) map[string]any {
-	return h.doRequest(http.MethodPatch, OSLcastString(url), data)
+	return h.doRequest(http.MethodPatch, OSLtoString(url), data)
 }
 
 func (h *HTTP) Delete(url any, data ...map[string]any) map[string]any {
@@ -110,7 +110,7 @@ func (h *HTTP) Delete(url any, data ...map[string]any) map[string]any {
 	if len(data) > 0 {
 		m = data[0]
 	}
-	return h.doRequest(http.MethodDelete, OSLcastString(url), m)
+	return h.doRequest(http.MethodDelete, OSLtoString(url), m)
 }
 
 func (h *HTTP) Options(url any, data ...map[string]any) map[string]any {
@@ -118,7 +118,7 @@ func (h *HTTP) Options(url any, data ...map[string]any) map[string]any {
 	if len(data) > 0 {
 		m = data[0]
 	}
-	return h.doRequest(http.MethodOptions, OSLcastString(url), m)
+	return h.doRequest(http.MethodOptions, OSLtoString(url), m)
 }
 
 func (h *HTTP) Head(url any, data ...map[string]any) map[string]any {
@@ -128,7 +128,7 @@ func (h *HTTP) Head(url any, data ...map[string]any) map[string]any {
 	}
 	out := map[string]any{"success": false}
 	headers, _ := extractHeadersAndBody(m)
-	req, err := http.NewRequest(http.MethodHead, OSLcastString(url), nil)
+	req, err := http.NewRequest(http.MethodHead, OSLtoString(url), nil)
 	if err != nil {
 		return out
 	}
