@@ -97,7 +97,7 @@ func (IMG) Open(path string) *OSL_img_Image {
 	return OSL_newImage(OSL_toRGBA(im))
 }
 
-func (IMG) Decode(r io.Reader) *OSL_img_Image {
+func (IMG) Decode(r OSLio.Reader) *OSL_img_Image {
 	im, _, err := OSL_image.Decode(r)
 	if err != nil {
 		return nil
@@ -123,7 +123,7 @@ func (IMG) OpenSize(path string) (int, int) {
 	return cfg.Width, cfg.Height
 }
 
-func (IMG) DecodeSize(r io.Reader) (int, int) {
+func (IMG) DecodeSize(r OSLio.Reader) (int, int) {
 	cfg, _, err := OSL_image.DecodeConfig(r)
 	if err != nil {
 		return 0, 0
@@ -133,11 +133,11 @@ func (IMG) DecodeSize(r io.Reader) (int, int) {
 
 /* -------------------- encode -------------------- */
 
-func (IMG) EncodePNG(w io.Writer, i *OSL_img_Image) bool {
+func (IMG) EncodePNG(w OSLio.Writer, i *OSL_img_Image) bool {
 	return i != nil && !i.closed && png.Encode(w, i.im) == nil
 }
 
-func (IMG) EncodeJPEG(w io.Writer, i *OSL_img_Image, q int) bool {
+func (IMG) EncodeJPEG(w OSLio.Writer, i *OSL_img_Image, q int) bool {
 	if i == nil || i.closed {
 		return false
 	}
@@ -337,7 +337,7 @@ func (IMG) rotateAny(src *OSL_image.RGBA, angle float64) *OSL_img_Image {
 
 /* -------------------- exif orientation -------------------- */
 
-func (IMG) NormalizeOrientation(i *OSL_img_Image, r io.Reader) *OSL_img_Image {
+func (IMG) NormalizeOrientation(i *OSL_img_Image, r OSLio.Reader) *OSL_img_Image {
 	if i == nil || i.closed {
 		return nil
 	}

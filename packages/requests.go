@@ -7,7 +7,7 @@ type HTTP struct {
 	Client *http.Client
 }
 
-func extractHeadersAndBody(data map[string]any) (headers map[string]string, body io.Reader) {
+func extractHeadersAndBody(data map[string]any) (headers map[string]string, body OSLio.Reader) {
 	headers = make(map[string]string)
 	if data != nil {
 		if raw, ok := data["body"]; ok {
@@ -75,7 +75,7 @@ func (h *HTTP) doRequest(method, url string, data map[string]any) map[string]any
 	out["raw"] = resp
 	out["success"] = true
 
-	respBody, err := io.ReadAll(resp.Body)
+	respBody, err := OSLio.ReadAll(resp.Body)
 	if err != nil {
 		return out
 	}

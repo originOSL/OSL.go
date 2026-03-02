@@ -100,7 +100,7 @@ func (FS) CopyDir(srcPath any, dstPath any) bool {
 			return false
 		}
 
-		if _, err := io.Copy(out, in); err != nil {
+		if _, err := OSLio.Copy(out, in); err != nil {
 			in.Close()
 			out.Close()
 			return false

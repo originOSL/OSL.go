@@ -1152,7 +1152,9 @@ func (utils *OSLUtils) GenerateAST(code string, start int, main bool) []*Token {
 					var params []string
 					for _, p := range second.Parameters {
 						var paramStr string
-						if blk, ok := p.Data.([]*Token); ok {
+						if p.Source != "" && p.Source != "[ast BLK]" {
+							paramStr = p.Source
+						} else if blk, ok := p.Data.([]*Token); ok {
 							parts := []string{}
 							for _, t := range blk {
 								if s, ok := t.Data.(string); ok {
@@ -1165,7 +1167,11 @@ func (utils *OSLUtils) GenerateAST(code string, start int, main bool) []*Token {
 								paramStr = parts[0]
 							}
 						} else if data, ok := p.Data.(string); ok {
-							paramStr = data
+							if p.SetType != "" {
+								paramStr = p.SetType + " " + data
+							} else {
+								paramStr = data
+							}
 						}
 						if paramStr != "" {
 							params = append(params, paramStr)
@@ -1604,7 +1610,6 @@ func (utils *OSLUtils) GenerateFullAST(code string, main bool) [][]*Token {
 					newLines := append(filteredLines[:i+1], filteredLines[i+len(blockLines)+1:]...)
 					filteredLines = newLines
 					// Adjust index to account for removed lines
-					i = i
 				} else if !hasUnclosedParen && i+1 < len(filteredLines) {
 					// Look for the next line as the block (old behavior)
 					blk := filteredLines[i+1]

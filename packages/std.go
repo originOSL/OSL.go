@@ -306,6 +306,14 @@ func OSLsort(arr []any) []any {
 	return arr
 }
 
+func OSLreplace(s string, old string, new string) string {
+	return strings.ReplaceAll(s, old, new)
+}
+
+func OSLreplaceFirst(s string, old string, new string) string {
+	return strings.Replace(s, old, new, 1)
+}
+
 func OSLsortBy(arr []any, key any) []any {
 	if arr == nil {
 		return nil
@@ -603,7 +611,7 @@ func OSLmultiply[AT float64 | int | string, BT float64 | int](a AT, b BT) AT {
 		return any(out).(AT)
 	}
 
-	return AT(any(OSLcastNumber(a) * OSLcastNumber(b)).(AT))
+	return any(OSLcastNumber(a) * OSLcastNumber(b)).(AT)
 }
 
 func OSLdivide[T float64 | int](a T, b T) float64 {
@@ -664,11 +672,11 @@ func OSLfloor(n any) float64 {
 	}
 }
 
-func OSLtrim(s any, from int, to int) string {
+func OSLtrim[F int | float64, T int | float64](s any, from F, to T) string {
 	str := []rune(OSLtoString(s))
 
-	start := from - 1
-	end := to
+	start := int(from) - 1
+	end := int(to)
 
 	if start < 0 {
 		start = 0
