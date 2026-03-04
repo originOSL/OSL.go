@@ -955,7 +955,6 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 			// Generate variable declarations for hoisted variables
 			var hoistDecls strings.Builder
 			if len(ctx.HoistedVars) > 0 {
-				fmt.Fprintln(os.Stderr, "DEBUG: Hoisted vars:", ctx.HoistedVars)
 				for _, varName := range ctx.HoistedVars {
 					var goType string
 					if ctx.VariableTypes[varName] != "" {
