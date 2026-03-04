@@ -313,8 +313,11 @@ func Compile(ast [][]*Token) string {
 
 		// Compile the initialization first to populate global variables
 		ctx.IsInit = true
-		ctx.GlobalVars = strings.Builder{}
-		initCompiled = CompileBlock(initNoFuncs, ctx)
+		if ctx.GlobalVars.Len() == 0 {
+			ctx.GlobalVars = strings.Builder{}
+			initCompiled = CompileBlock(initNoFuncs, ctx)
+		}
+		ctx.IsInit = false
 
 		// Save the global state for functions
 		ctx.GlobalDeclaredVars = make(map[string]bool)
@@ -433,8 +436,11 @@ func Compile(ast [][]*Token) string {
 
 		// Compile initialization to populate global variables (only, no runtime code)
 		ctx.IsInit = true
-		ctx.GlobalVars = strings.Builder{}
-		_ = CompileBlock(initNoFuncs, ctx)
+		if ctx.GlobalVars.Len() == 0 {
+			ctx.GlobalVars = strings.Builder{}
+			_ = CompileBlock(initNoFuncs, ctx)
+		}
+		ctx.IsInit = false
 
 		// Save global state for functions
 		ctx.GlobalDeclaredVars = make(map[string]bool)
@@ -1086,7 +1092,10 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 
 		if varName != "" {
 			// OSL has function-level scoping - all variables inside a function should be hoisted to top
-			shouldHoist := ctx.Indent > 0 && !contains(ctx.HoistedVars, varName)
+			// However, variables with a type should be hoisted, but untyped variables should use globals if they exist
+			shouldHoist := ctx.Indent > 0 &&
+				!contains(ctx.HoistedVars, varName) &&
+				(token.SetType != "" || !ctx.GlobalDeclaredVars[varName])
 			if shouldHoist {
 				ctx.HoistedVars = append(ctx.HoistedVars, varName)
 				ctx.DeclaredVars[varName] = true   // Mark as declared to prevent re-declaration in same location
