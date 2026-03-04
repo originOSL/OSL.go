@@ -74,6 +74,33 @@ func mapOSLTypeToGo(oslType string) string {
 	return oslType
 }
 
+func isConstantExpression(token *Token) bool {
+	if token == nil {
+		return true
+	}
+
+	switch token.Type {
+	case TKN_NUM, TKN_STR:
+		return true
+	case TKN_RAW:
+		return true
+	case TKN_VAR:
+		return true
+	case TKN_ARR:
+		if arr, ok := token.Data.([]*Token); ok {
+			for _, item := range arr {
+				if !isConstantExpression(item) {
+					return false
+				}
+			}
+			return true
+		}
+		return false
+	default:
+		return false
+	}
+}
+
 func processImports(ctx *VariableContext) (compiled string, goImports []string) {
 	var orderedImports []string
 	processed := make(map[string]bool)
@@ -251,6 +278,7 @@ func Compile(ast [][]*Token) string {
 	var initNoFuncs [][]*Token
 	initCompiled := ""
 	mainCompiled := ""
+	var mainBody string
 
 	if pivot >= 0 {
 		init = ast[:pivot]
@@ -348,7 +376,45 @@ func Compile(ast [][]*Token) string {
 		}
 
 		if !hasDefMain {
-			panic("OSL files without mainloop: must define a def main() function")
+			// No def main() found - auto-generate main() from top-level code
+			// Separate constants (global variables) from runtime code
+			constantAssignments := [][]*Token{}
+			runtimeCode := [][]*Token{}
+
+			for _, line := range initNoFuncs {
+				if len(line) > 0 {
+					// Commands (like log, each, etc.) always go to runtime
+					if line[0].Type == TKN_CMD {
+						runtimeCode = append(runtimeCode, line)
+						continue
+					}
+
+					// Check if this is a constant assignment (no function calls, just literals/variables)
+					if line[0].Type == TKN_ASI {
+						// Check if the right side is a literal or variable (not a function call)
+						isConstant := isConstantExpression(line[0].Right)
+						if isConstant {
+							constantAssignments = append(constantAssignments, line)
+						} else {
+							runtimeCode = append(runtimeCode, line)
+						}
+					} else {
+						// Everything else goes to runtime
+						runtimeCode = append(runtimeCode, line)
+					}
+				}
+			}
+
+			// Compile constants as globals
+			ctx.IsInit = true
+			ctx.GlobalVars = strings.Builder{}
+			initNoFuncs = constantAssignments
+			_ = CompileBlock(initNoFuncs, ctx)
+			ctx.IsInit = false
+
+			// Compile runtime code as main function body
+			mainBody = CompileBlock(runtimeCode, ctx)
+			hasDefMain = true
 		}
 
 		// Mark all top-level function names as declared so they don't get declared as variables
@@ -388,7 +454,6 @@ func Compile(ast [][]*Token) string {
 		output := ctx.GlobalVars.String() + funcsCompiled
 
 		// Extract and compile the main function body directly as Go's main()
-		mainBody := ""
 		if mainFunction != nil {
 			if mainFunction[0].Type == TKN_CMD && mainFunction[0].Data == "def" {
 				// def main() ( body )
@@ -449,6 +514,7 @@ func Compile(ast [][]*Token) string {
 		}
 
 		prepend.WriteString("import (\n")
+		prepend.WriteString("\t\"encoding/base64\"\n")
 		for _, imp := range uniqueImports {
 			prepend.WriteString("\t" + imp + "\n")
 		}
@@ -684,30 +750,6 @@ func collectVariableDeclarations(block [][]*Token, ctx *VariableContext) map[str
 func CompileBlock(block [][]*Token, ctx *VariableContext) string {
 	var out strings.Builder
 
-	varDecls := collectVariableDeclarations(block, ctx)
-
-	for varName, varType := range varDecls {
-		if !ctx.DeclaredVars[varName] {
-			ctx.DeclaredVars[varName] = true
-			if varType != "" {
-				ctx.VariableTypes[varName] = varType
-				// For global typed variables, don't output declaration yet - let the assignment line handle it
-				// For local typed variables, output the declaration
-				if !(ctx.IsInit && ctx.Indent == 0) {
-					out.WriteString(AddIndent(fmt.Sprintf("var %v %v\n", varName, varType), ctx.Indent*2))
-				}
-			} else {
-				// Untyped variables - output a declaration
-				if ctx.IsInit && ctx.Indent == 0 {
-					fmt.Fprintf(&ctx.GlobalVars, "var %v\n", varName)
-					ctx.GlobalDeclaredVars[varName] = true
-				} else {
-					out.WriteString(AddIndent(fmt.Sprintf("var %v\n", varName), ctx.Indent*2))
-				}
-			}
-		}
-	}
-
 	for _, line := range block {
 		out.WriteString(AddIndent(CompileLine(line, ctx), ctx.Indent*2))
 	}
@@ -861,6 +903,8 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 
 			savedDeclaredVars := ctx.DeclaredVars
 			ctx.DeclaredVars = make(map[string]bool)
+			savedHoistedVars := ctx.HoistedVars
+			ctx.HoistedVars = []string{}
 
 			params_string := ""
 			if len(token.Right.Parameters) > 0 {
@@ -891,16 +935,35 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 				returns = mapOSLTypeToGo(token.Right.Returns) + " "
 			}
 
-			funcBody := ""
 			var blockData [][]*Token
 			if len(token.Right.Parameters) > 1 && token.Right.Parameters[1] != nil {
 				if bd, ok := token.Right.Parameters[1].Data.([][]*Token); ok {
 					blockData = bd
-					funcBody = CompileBlock(blockData, ctx)
-					if ctx.selfUsed {
-						params_string = "OSLself any, " + params_string
-						ctx.selfUsed = false
+				}
+			}
+
+			// Compile function body to collect hoisted variables
+			funcBody := ""
+			if blockData != nil {
+				funcBody = CompileBlock(blockData, ctx)
+				if ctx.selfUsed {
+					params_string = "OSLself any, " + params_string
+					ctx.selfUsed = false
+				}
+			}
+
+			// Generate variable declarations for hoisted variables
+			var hoistDecls strings.Builder
+			if len(ctx.HoistedVars) > 0 {
+				fmt.Fprintln(os.Stderr, "DEBUG: Hoisted vars:", ctx.HoistedVars)
+				for _, varName := range ctx.HoistedVars {
+					var goType string
+					if ctx.VariableTypes[varName] != "" {
+						goType = ctx.VariableTypes[varName]
+					} else {
+						goType = "any"
 					}
+					hoistDecls.WriteString(fmt.Sprintf("\tvar %v %v\n", varName, goType))
 				}
 			}
 
@@ -912,6 +975,7 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 
 			out := "func " + token.Left.Data.(string) + "(" +
 				params_string + ") " + returns + "{\n" +
+				hoistDecls.String() +
 				funcBody
 
 			if returns == "any " && hasReturn && !strings.Contains(funcBody, "return ") {
@@ -921,6 +985,7 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 			out += "}"
 
 			ctx.DeclaredVars = savedDeclaredVars
+			ctx.HoistedVars = savedHoistedVars
 			ctx.Indent--
 			ctx.ScopeLevel--
 			return out
@@ -935,7 +1000,7 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 		case "=":
 			op = "="
 		case ":=":
-			op = ":="
+			op = "="
 		case "++":
 			op = "+="
 			compiledRight = "1"
@@ -1021,6 +1086,14 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 		}
 
 		if varName != "" {
+			// OSL has function-level scoping - all variables inside a function should be hoisted to top
+			shouldHoist := ctx.Indent > 0 && !contains(ctx.HoistedVars, varName)
+			if shouldHoist {
+				ctx.HoistedVars = append(ctx.HoistedVars, varName)
+				ctx.DeclaredVars[varName] = true   // Mark as declared to prevent re-declaration in same location
+				ctx.VariableTypes[varName] = "any" // Default type that will be overridden by typed vars
+			}
+
 			declared := ctx.DeclaredVars[varName]
 			if !declared {
 				ctx.DeclaredVars[varName] = true
@@ -1072,13 +1145,17 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 				}
 				// Check if variable is already declared (e.g., with a type)
 				// If so, use = instead of :=
-				if declared || ctx.GlobalDeclaredVars[varName] {
+				if declared || ctx.GlobalDeclaredVars[varName] || contains(ctx.HoistedVars, varName) {
 					return fmt.Sprintf("%v = %v", varName, compiledRight)
 				}
 				if goType == "auto" && op == "=" {
 					return fmt.Sprintf("%v := %v", varName, compiledRight)
 				}
 				return fmt.Sprintf("%v := %v", varName, compiledRight)
+			}
+			// For hoisted variables, convert := to = at function body level
+			if contains(ctx.HoistedVars, varName) && op == ":=" {
+				op = "="
 			}
 			if !declared {
 				inferredType := ""
@@ -1122,13 +1199,13 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 			if op == ":=" {
 				// Check if variable is already declared (with a type or previously)
 				// If so, convert := to =
-				if declared || ctx.GlobalDeclaredVars[varName] || ctx.VariableTypes[varName] != "" {
+				if declared || ctx.GlobalDeclaredVars[varName] || ctx.VariableTypes[varName] != "" || contains(ctx.HoistedVars, varName) {
 					varOut = fmt.Sprintf("%v = %v", varName, compiledRight)
 				} else {
 					varOut = fmt.Sprintf("var %v = %v", varName, compiledRight)
 					ctx.DeclaredVars[varName] = true
 				}
-			} else if op == "=" && !declared && !ctx.GlobalDeclaredVars[varName] && token.SetType == "" {
+			} else if op == "=" && !declared && !ctx.GlobalDeclaredVars[varName] && token.SetType == "" && !contains(ctx.HoistedVars, varName) {
 				varOut = fmt.Sprintf("var %v = %v", varName, compiledRight)
 				if ctx.IsInit && ctx.Indent == 0 {
 					ctx.GlobalVars.WriteString(varOut + "\n")
@@ -1942,48 +2019,76 @@ func CompileCmd(cmd []*Token, ctx *VariableContext) string {
 		if len(cmd) < 3 {
 			panic("Loop command requires at least 1 parameter")
 		}
-		var iteratorVar string = "i_" + RandomString(5)
-		loopNumber := CompileToken(cmd[1], ctx)
-		blk := cmd[2]
-		var blockData [][]*Token
-		if blkData, ok := blk.Data.([][]*Token); ok {
-			blockData = blkData
-		} else if dataStr, ok := blk.Data.(string); ok {
-			blockData = scriptToAst(dataStr)
-		} else if singleToken, ok := blk.Data.([]*Token); ok {
-			blockData = append(blockData, singleToken)
-		}
-		ctx.Indent++
 
-		var loopCondition string
-		returnType := cmd[1].ReturnedType
+		// Check if this is an "each i item array" pattern (4+ arguments)
+		if len(cmd) >= 5 && cmd[1].Type == TKN_VAR && cmd[2].Type == TKN_VAR {
+			indexVar := cmd[1].Data.(string)
+			itemVar := cmd[2].Data.(string)
+			array := CompileToken(cmd[3], ctx)
+			blk := cmd[4]
+			var blockData [][]*Token
+			if blkData, ok := blk.Data.([][]*Token); ok {
+				blockData = blkData
+			} else if dataStr, ok := blk.Data.(string); ok {
+				blockData = scriptToAst(dataStr)
+			} else if singleToken, ok := blk.Data.([]*Token); ok {
+				blockData = append(blockData, singleToken)
+			}
+			ctx.DeclaredVars[indexVar] = true
+			ctx.DeclaredVars[itemVar] = true
+			ctx.VariableTypes[indexVar] = "int"
+			ctx.VariableTypes[itemVar] = "any"
+			ctx.Indent++
+			// Use 1-indexed array like OSL
+			out += fmt.Sprintf("for _%v_idx, %v := range %v {\n\t%v := _%v_idx + 1\n", indexVar, itemVar, array, indexVar, indexVar)
+			out += CompileBlock(blockData, ctx)
+			ctx.Indent--
+			out += AddIndent("}", ctx.Indent*2)
+		} else {
+			// Original "loop N" behavior
+			var iteratorVar string = "i_" + RandomString(5)
+			loopNumber := CompileToken(cmd[1], ctx)
+			blk := cmd[2]
+			var blockData [][]*Token
+			if blkData, ok := blk.Data.([][]*Token); ok {
+				blockData = blkData
+			} else if dataStr, ok := blk.Data.(string); ok {
+				blockData = scriptToAst(dataStr)
+			} else if singleToken, ok := blk.Data.([]*Token); ok {
+				blockData = append(blockData, singleToken)
+			}
+			ctx.Indent++
 
-		// Try to get variable type from context if it's a variable reference
-		if cmd[1].Type == TKN_VAR {
-			if varName, ok := cmd[1].Data.(string); ok {
-				if varType, exists := ctx.VariableTypes[varName]; exists {
-					if varType == "float64" {
-						returnType = TYPE_NUM
+			var loopCondition string
+			returnType := cmd[1].ReturnedType
+
+			// Try to get variable type from context if it's a variable reference
+			if cmd[1].Type == TKN_VAR {
+				if varName, ok := cmd[1].Data.(string); ok {
+					if varType, exists := ctx.VariableTypes[varName]; exists {
+						if varType == "float64" {
+							returnType = TYPE_NUM
+						}
 					}
 				}
 			}
-		}
 
-		switch returnType {
-		case TYPE_NUM:
-			loopCondition = fmt.Sprintf("float64(%v) <= %v", iteratorVar, loopNumber)
-			loopNumber = fmt.Sprintf("int(%v)", loopNumber)
-		case TYPE_STR, TYPE_ARR, TYPE_OBJ:
-			loopCondition = fmt.Sprintf("%v <= OSLround(%v)", iteratorVar, loopNumber)
-			loopNumber = fmt.Sprintf("OSLround(%v)", loopNumber)
-		default:
-			loopCondition = fmt.Sprintf("%v <= %v", iteratorVar, loopNumber)
-		}
+			switch returnType {
+			case TYPE_NUM:
+				loopCondition = fmt.Sprintf("float64(%v) <= %v", iteratorVar, loopNumber)
+				loopNumber = fmt.Sprintf("int(%v)", loopNumber)
+			case TYPE_STR, TYPE_ARR, TYPE_OBJ:
+				loopCondition = fmt.Sprintf("%v <= OSLround(%v)", iteratorVar, loopNumber)
+				loopNumber = fmt.Sprintf("OSLround(%v)", loopNumber)
+			default:
+				loopCondition = fmt.Sprintf("%v <= %v", iteratorVar, loopNumber)
+			}
 
-		out += fmt.Sprintf("for %v := 1; %v; %v++ {\n", iteratorVar, loopCondition, iteratorVar)
-		out += CompileBlock(blockData, ctx)
-		ctx.Indent--
-		out += AddIndent("}", ctx.Indent*2)
+			out += fmt.Sprintf("for %v := 1; %v; %v++ {\n", iteratorVar, loopCondition, iteratorVar)
+			out += CompileBlock(blockData, ctx)
+			ctx.Indent--
+			out += AddIndent("}", ctx.Indent*2)
+		}
 	case "for":
 		if len(cmd) < 3 {
 			panic("For command requires at least 2 parameters")
@@ -2235,6 +2340,8 @@ func CompileCmd(cmd []*Token, ctx *VariableContext) string {
 
 		savedDeclaredVars := ctx.DeclaredVars
 		ctx.DeclaredVars = make(map[string]bool)
+		savedHoistedVars := ctx.HoistedVars
+		ctx.HoistedVars = []string{}
 
 		var paramString strings.Builder
 		if len(cmd) > 2 {
@@ -2287,6 +2394,20 @@ func CompileCmd(cmd []*Token, ctx *VariableContext) string {
 			}
 		}
 
+		// Generate variable declarations for hoisted variables
+		var hoistDecls string
+		if len(ctx.HoistedVars) > 0 {
+			for _, varName := range ctx.HoistedVars {
+				var goType string
+				if ctx.VariableTypes[varName] != "" {
+					goType = ctx.VariableTypes[varName]
+				} else {
+					goType = "any"
+				}
+				hoistDecls += fmt.Sprintf("\tvar %v %v\n", varName, goType)
+			}
+		}
+
 		hasReturn := hasReturnStatement(blockData)
 		funcResult := ""
 		if hasReturn {
@@ -2297,9 +2418,10 @@ func CompileCmd(cmd []*Token, ctx *VariableContext) string {
 			funcBody += AddIndent("return nil\n", ctx.Indent*2)
 		}
 
-		out = "func " + funcName + "(" + paramString.String() + ") " + funcResult + " {\n" + funcBody + "}"
+		out = "func " + funcName + "(" + paramString.String() + ") " + funcResult + " {\n" + hoistDecls + funcBody + "}"
 
 		ctx.DeclaredVars = savedDeclaredVars
+		ctx.HoistedVars = savedHoistedVars
 		ctx.Indent--
 		ctx.ScopeLevel--
 	case "import":

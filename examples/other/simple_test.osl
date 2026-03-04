@@ -1,0 +1,4 @@
+// Simple test
+log "Hello"
+numbers = [1, 2, 3]
+log numbers

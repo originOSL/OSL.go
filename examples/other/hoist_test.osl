@@ -1,0 +1,24 @@
+// Test variable hoisting
+def testHoisting() (
+  log "Before if block"
+  
+  if true (
+    string message = "Hello"
+    number count = 42
+    array items = [1, 2, 3]
+    log message
+    log count
+    log items
+  )
+  
+  log "After if block"
+  
+  if false (
+    string other = "World"
+    log other
+  )
+  
+  log "End of function"
+)
+
+testHoisting()

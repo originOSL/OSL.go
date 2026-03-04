@@ -1,0 +1,14 @@
+def main() (
+    original = "Hello, OSL!"
+    
+    encoded = btoa(original)
+    log "Original: " + original
+    log "Encoded: " + encoded
+    log ""
+    
+    decoded = atob(encoded)
+    log "Decoded: " + decoded
+    log ""
+    
+    log "Match: " + (original == decoded)
+)

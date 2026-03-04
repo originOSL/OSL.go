@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	OSL_VERSION  = "0.2.0"
+	OSL_VERSION  = "0.3.0"
 	OSL_NAME     = "OSL.go"
 	OSL_AUTHOR   = "Mistium"
 	OSL_LICENSE  = "MIT"

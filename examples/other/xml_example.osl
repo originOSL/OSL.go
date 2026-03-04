@@ -1,0 +1,24 @@
+import "osl/xml"
+
+def main() (
+    doc = xml.Parse("<root><item id=\"1\" type=\"test\">First item</item><item id=\"2\">Second item</item></root>")
+    
+    log "XML String:"
+    log doc.toStr()
+    log ""
+    
+    log "Get first item:"
+    log doc.get("root>item")
+    log ""
+    
+    log "Get text of first item:"
+    log doc.getText("root>item")
+    log ""
+    
+    log "Get attribute:"
+    log doc.getAttr("root>item", "type")
+    log ""
+    
+    log "Count items:"
+    log doc.count("root")
+)

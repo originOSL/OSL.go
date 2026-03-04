@@ -1,0 +1,12 @@
+def main() (
+  numbers = [1, 2, 3, 4, 5]
+  each i num numbers (
+    log "Index:" i
+    log "Number:" num
+  )
+  
+  words = ["hello", "world", "osl"]
+  each id word words (
+    log id ":" word
+  )
+)

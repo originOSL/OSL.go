@@ -1,0 +1,68 @@
+import "osl/tui"
+
+def main() (
+    tui.Clear()
+
+    log tui.Style("bold", tui.Color("cyan", "═══ OSL TUI Package Demo ═══"))
+    log ""
+
+    log tui.Status("success", "TUI package loaded successfully!")
+    log tui.Status("info", "This package provides terminal UI utilities")
+    log tui.Status("warning", "Use with care in production")
+    log tui.Status("error", "Error handling example")
+    log ""
+
+    log tui.Style("underline", "Color Examples:")
+    log "  " + tui.Color("red", "Red text")
+    log "  " + tui.Color("green", "Green text")
+    log "  " + tui.Color("yellow", "Yellow text")
+    log "  " + tui.Color("blue", "Blue text")
+    log "  " + tui.Color("magenta", "Magenta text")
+    log "  " + tui.Color("cyan", "Cyan text")
+    log ""
+
+    log tui.Style("underline", "Style Examples:")
+    log "  " + tui.Style("bold", "Bold text")
+    log "  " + tui.Style("dim", "Dim text")
+    log "  " + tui.Style("underline", "Underlined text")
+    log ""
+
+    log tui.Style("underline", "Progress Bar:")
+    log "  " + tui.Progress(7, 10, 30)
+    log "  " + tui.Progress(15, 20, 30)
+    log ""
+
+    log tui.Style("underline", "Box Example:")
+    log tui.Box("My Box", "This is some content\ninside the box.\nPretty cool, right?")
+    log ""
+
+    log tui.Style("underline", "Divider:")
+    log "  " + tui.Divider("=", 40, "Section Title")
+    log ""
+
+    log tui.Style("underline", "Table Example:")
+    headers = ["Name", "Age", "Country"]
+    rows = [
+        ["Alice", 25, "USA"],
+        ["Bob", 30, "Canada"],
+        ["Charlie", 28, "UK"]
+    ]
+    log tui.Table(headers, rows)
+    log ""
+
+    log tui.Style("underline", "Frame Example:")
+    log tui.Frame("Framed Content", 30)
+    log ""
+
+    log tui.Style("underline", "Bar Chart Example:")
+    data = [
+        {"label": "Item A", "value": 50},
+        {"label": "Item B", "value": 75},
+        {"label": "Item C", "value": 30},
+        {"label": "Item D", "value": 90}
+    ]
+    log tui.BarChart(data, 30, true)
+    log ""
+
+    log tui.Style("bold", tui.Color("green", "✓ Demo Complete!"))
+)

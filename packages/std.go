@@ -1219,3 +1219,17 @@ func (s OSLString) isKeyDown() bool {
 func (s OSLString) toNum() float64 {
 	return OSLcastNumber(string(s))
 }
+
+func atob(encoded string) string {
+	data, err := OSLio.ReadAll(base64.NewDecoder(base64.StdEncoding, strings.NewReader(encoded)))
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
+func btoa(data string) string {
+	encoded := base64.StdEncoding.EncodeToString([]byte(data))
+	return encoded
+}
+

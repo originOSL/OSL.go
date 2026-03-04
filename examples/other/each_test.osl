@@ -1,0 +1,19 @@
+// Test each command with arrays
+
+// Test 1: Basic array iteration
+numbers = [10, 20, 30, 40, 50]
+each i num numbers (
+    log "Index:" i
+    log "Value:" num
+)
+
+// Test 2: Iterate over string array
+words = ["hello", "world", "osl"]
+each i word words (
+    log i ":" word
+)
+
+// Test 3: Iterate with range operator
+each val 1 to 5 (
+    log val
+)

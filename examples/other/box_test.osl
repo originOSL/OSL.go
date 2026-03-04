@@ -1,0 +1,7 @@
+import "osl/tui"
+
+def main() (
+    log tui.Box("Fixed Box", "The box is now\nproperly connected\non all sides!")
+    log ""
+    log tui.Box("Wide Title Test", "Short")
+)
