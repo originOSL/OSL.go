@@ -12,8 +12,8 @@ type Connection struct {
 	dataMutex sync.RWMutex
 	data      map[string]any
 
-	onMessage func(string)
-	onClose   func()
+	onMessage func(*Connection, string)
+	onClose   func(*Connection)
 }
 
 type WS struct{}
@@ -252,11 +252,11 @@ func (c *Connection) GetAll() map[string]any {
 	return copy
 }
 
-func (c *Connection) OnMessage(handler func(string)) {
+func (c *Connection) OnMessage(handler func(*Connection, string)) {
 	c.onMessage = handler
 }
 
-func (c *Connection) OnClose(handler func()) {
+func (c *Connection) OnClose(handler func(*Connection)) {
 	c.onClose = handler
 }
 
@@ -269,7 +269,7 @@ func (c *Connection) readLoop() {
 			return
 		}
 		if c.onMessage != nil {
-			c.onMessage(string(message))
+			c.onMessage(c, string(message))
 		}
 	}
 }

@@ -61,6 +61,7 @@ var oslTypes = map[string]string{
 	"boolean": "bool",
 	"object":  "map[string]any",
 	"array":   "[]any",
+	"auto":    "any",
 }
 
 func mapOSLTypeToGo(oslType string) string {
@@ -674,9 +675,7 @@ func OSLcastToString(expr string, typeHint string) string {
 func collectVariableDeclarations(block [][]*Token, ctx *VariableContext) map[string]string {
 	varDecls := make(map[string]string)
 	savedDeclaredVars := make(map[string]bool)
-	for k, v := range ctx.DeclaredVars {
-		savedDeclaredVars[k] = v
-	}
+	maps.Copy(savedDeclaredVars, ctx.DeclaredVars)
 
 	for _, line := range block {
 		if len(line) == 0 {
@@ -744,9 +743,7 @@ func collectVariableDeclarations(block [][]*Token, ctx *VariableContext) map[str
 			ctx.Indent++
 			subDecls := collectVariableDeclarations(blk, ctx)
 			ctx.Indent = saveIndent
-			for k, v := range subDecls {
-				varDecls[k] = v
-			}
+			maps.Copy(varDecls, subDecls)
 		}
 	}
 
@@ -1151,15 +1148,10 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 					ctx.GlobalDeclaredVars[varName] = true
 					return ""
 				}
-				// Check if variable is already declared (e.g., with a type)
-				// If so, use = instead of :=
-				if declared || ctx.GlobalDeclaredVars[varName] || contains(ctx.HoistedVars, varName) {
-					return fmt.Sprintf("%v = %v", varName, compiledRight)
-				}
-				if goType == "auto" && op == "=" {
+				if token.SetType == "auto" {
 					return fmt.Sprintf("%v := %v", varName, compiledRight)
 				}
-				return fmt.Sprintf("%v := %v", varName, compiledRight)
+				return fmt.Sprintf("%v = %v", varName, compiledRight)
 			}
 			// For hoisted variables, convert := to = at function body level
 			if contains(ctx.HoistedVars, varName) && op == ":=" {
@@ -2325,6 +2317,8 @@ func CompileCmd(cmd []*Token, ctx *VariableContext) string {
 			panic("Case command requires at least 1 parameter")
 		}
 		out += "case " + CompileToken(cmd[1], ctx) + ":\n"
+	case "default":
+		out += "default:\n"
 	case "def":
 		if len(cmd) < 2 {
 			panic("Def command requires at least 1 parameter")
