@@ -202,7 +202,7 @@ func processImports(ctx *VariableContext) (compiled string, goImports []string) 
 		}
 	}
 
-	return compiled, goImports
+	return compiled + "\n", goImports
 }
 
 func Compile(ast [][]*Token) string {
@@ -605,7 +605,7 @@ func Compile(ast [][]*Token) string {
 		}
 	}
 
-	return prepend.String() + methodsCompiled.String() + importsCompiled + mainCompiled
+	return prepend.String() + methodsCompiled.String() + importsCompiled + "\n" + mainCompiled
 }
 
 func HasDrawingCommands(ast [][]*Token) bool {
