@@ -197,15 +197,22 @@ func (s *Server) Stop() error {
 // Connection methods (shared by client and server)
 
 func (c *Connection) Send(message any) {
+	var data []byte
 	switch v := message.(type) {
 	case string:
-		c.send <- []byte(v)
+		data = []byte(v)
 	case map[string]any:
-		c.send <- []byte(JsonStringify(v))
+		data = []byte(JsonStringify(v))
 	case []any:
-		c.send <- []byte(JsonStringify(v))
+		data = []byte(JsonStringify(v))
 	default:
 		panic("Invalid message type: " + reflect.TypeOf(message).String())
+	}
+
+	select {
+	case c.send <- data:
+	default:
+		log.Println("send buffer full, dropping message")
 	}
 }
 
@@ -215,7 +222,7 @@ func (c *Connection) Close() {
 		c.conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
 		c.conn.Close()
 		if c.onClose != nil {
-			c.onClose(c)
+			go c.onClose(c)
 		}
 	})
 }
@@ -269,7 +276,8 @@ func (c *Connection) readLoop() {
 			return
 		}
 		if c.onMessage != nil {
-			c.onMessage(c, string(message))
+			msg := string(message)
+			go c.onMessage(c, msg)
 		}
 	}
 }
