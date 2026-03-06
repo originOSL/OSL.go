@@ -69,6 +69,12 @@ func mapOSLTypeToGo(oslType string) string {
 	if ok {
 		return val
 	}
+	if oslType == "null" {
+		return ""
+	}
+	if strings.HasSuffix(oslType, " null") {
+		return strings.TrimSuffix(oslType, " null")
+	}
 	if before, ok := strings.CutSuffix(oslType, "[]"); ok {
 		return "[]" + mapOSLTypeToGo(before)
 	}
@@ -934,9 +940,10 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 			}
 			params_string = strings.TrimSuffix(params_string, ", ")
 			returns := ""
-			if token.Right.Returns != "" {
-				returns = mapOSLTypeToGo(token.Right.Returns) + " "
+			if token.Right.Returns == "" {
+				returns = ""
 			}
+			returns = mapOSLTypeToGo(token.Right.Returns)
 
 			var blockData [][]*Token
 			if len(token.Right.Parameters) > 1 && token.Right.Parameters[1] != nil {
@@ -975,10 +982,13 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 				returns = "any "
 			}
 
-			out := "func " + token.Left.Data.(string) + "(" +
-				params_string + ") " + returns + "{\n" +
-				hoistDecls.String() +
-				funcBody
+			var funcSignature string
+			if returns != "" {
+				funcSignature = "func " + token.Left.Data.(string) + "(" + params_string + ") " + returns + "{\n"
+			} else {
+				funcSignature = "func " + token.Left.Data.(string) + "(" + params_string + ") {\n"
+			}
+			out := funcSignature + hoistDecls.String() + funcBody
 
 			if returns == "any " && hasReturn && !strings.Contains(funcBody, "return ") {
 				out += "return nil\n"
@@ -1149,7 +1159,7 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 					return ""
 				}
 				if token.SetType == "auto" {
-					return fmt.Sprintf("%v := %v", varName, compiledRight)
+					return fmt.Sprintf("var %v = %v", varName, compiledRight)
 				}
 				return fmt.Sprintf("%v = %v", varName, compiledRight)
 			}
@@ -1440,22 +1450,26 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 					typeName := "any"
 					varName := args[i]
 					if len(parts) > 1 {
-						typeName = mapOSLTypeToGo(parts[1])
-						varName = parts[0]
+						typeName = mapOSLTypeToGo(parts[0])
+						varName = parts[1]
 					}
 					fmt.Fprintf(&paramString, "%v %v, ", varName, typeName)
 				}
 			}
-			returns := " "
+			returns := mapOSLTypeToGo(token.Returns)
 			// Inline functions without explicit return type always return any
 			if len(params) > 1 && token.Returns == "" {
-				returns = "any "
-			} else if len(params) > 1 {
-				returns = mapOSLTypeToGo(token.Returns) + " "
+				returns = "any"
 			} else if len(params) <= 1 {
-				returns = "any "
+				returns = "any"
 			}
-			out := fmt.Sprintf("(func(%v) %v{\n", strings.TrimSuffix(paramString.String(), ", "), returns)
+			var funcSig string
+			if returns != "" {
+				funcSig = fmt.Sprintf("(func(%v) %v{\n", strings.TrimSuffix(paramString.String(), ", "), returns)
+			} else {
+				funcSig = fmt.Sprintf("(func(%v) {\n", strings.TrimSuffix(paramString.String(), ", "))
+			}
+			out := funcSig
 
 			ctx.Indent++
 			ctx.ScopeLevel++
@@ -1476,6 +1490,7 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 					if returns == "any " && !hasReturn {
 						inner += AddIndent("return nil\n", ctx.Indent*2)
 					}
+					// null return type means void - no implicit return needed
 					out += inner
 				}
 			}
@@ -1705,7 +1720,13 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 
 				switch name {
 				case "call":
-					out = fmt.Sprintf("OSLcallFunc(%v.%v, %v)", out, part.Parameters[0].Data, JsonStringify(params[1:]))
+					var param_list strings.Builder
+					param_list.WriteString("[]any{")
+					for _, p := range part.Parameters {
+						param_list.WriteString(CompileToken(p, ctx) + ",")
+					}
+					param_list.WriteString("}")
+					out = fmt.Sprintf("OSLcallFunc(%v, nil, %v)", out, param_list.String())
 				case "toStr":
 					part.ReturnedType = TYPE_STR
 					out = fmt.Sprintf("OSLtoString(%v)", out)
@@ -2176,13 +2197,15 @@ func CompileCmd(cmd []*Token, ctx *VariableContext) string {
 			out += "type OSL_" + cmd[1].Data.(string) + " struct {\n"
 			selfTypes := make(map[string]string)
 			ctx.Indent++
+			var initParams []string
+			initParamsTypes := make(map[string]string)
 			for _, line := range cmd[2].Data.([][]*Token) {
 				switch line[0].Type {
 				case TKN_ASI:
 					val := line[0]
-					if val.Right != nil && val.Left != nil &&
-						val.Right.Type == TKN_FNC && val.Left.Type == TKN_VAR &&
-						val.Right.Data == "function" && ctx.Indent == 0 {
+					varName := val.Left.Data.(string)
+					if val.Right != nil && val.Left.Type == TKN_VAR &&
+						val.Right.Type == TKN_FNC && val.Right.Data == "function" && ctx.Indent == 0 {
 						ctx.Indent++
 						ctx.ScopeLevel++
 
@@ -2211,62 +2234,91 @@ func CompileCmd(cmd []*Token, ctx *VariableContext) string {
 								params_string += fmt.Sprintf("%v %v, ", varName, typeName)
 							}
 						}
-						params_string = strings.TrimSuffix(params_string, ", ")
 						returns := ""
-						if val.Right.Returns != "" {
-							returns = mapOSLTypeToGo(val.Right.Returns) + " "
+						if val.Right.Returns == "" {
+							returns = ""
 						}
+						returns = mapOSLTypeToGo(val.Right.Returns)
 
-						var blockData [][]*Token = nil
-						funcBody := ""
+						var blockData [][]*Token
 						if len(val.Right.Parameters) > 1 && val.Right.Parameters[1] != nil {
 							if bd, ok := val.Right.Parameters[1].Data.([][]*Token); ok {
 								blockData = bd
-								funcBody = CompileBlock(blockData, ctx)
-								if ctx.selfUsed {
-									params_string = "OSLself any, " + params_string
-									ctx.selfUsed = false
+							}
+						}
+
+						var funcBody string
+						if blockData != nil {
+							funcBody = CompileBlock(blockData, ctx)
+							if ctx.selfUsed {
+								funcBody = AddIndent("OSLself := OSLself\n", ctx.Indent*2) + funcBody
+								ctx.selfUsed = false
+							}
+						}
+
+						var funcSignature string
+						if returns != "" {
+							funcSignature = fmt.Sprintf("func (OSLself *OSL_%v) %v%v {\n", cmd[1].Data, params_string, returns)
+						} else {
+							funcSignature = fmt.Sprintf("func (OSLself *OSL_%v) %v {\n", cmd[1].Data, strings.TrimSuffix(params_string, ", "))
+						}
+						out += funcSignature + funcBody + "\n}\n"
+
+						// Check if this is the init method
+						if val.Left.Data.(string) == "init" {
+							initParams = strings.Split(strings.TrimSuffix(params_string, ", "), ", ")
+							for _, param := range initParams {
+								paramParts := strings.Fields(strings.TrimSpace(param))
+								if len(paramParts) >= 2 {
+									initParamsTypes[paramParts[0]] = paramParts[1]
 								}
 							}
 						}
 
-						hasReturn := hasReturnStatement(blockData)
-						if returns == "" && hasReturn {
-							returns = "any "
-						}
-
-						if hasReturn && !strings.Contains(funcBody, "return") {
-							funcBody += AddIndent("return nil\n", ctx.Indent*2)
-						}
-
-						out += fmt.Sprintf("func (OSLself *OSL_%v) %v%v {\n", cmd[1].Data, params_string, returns)
-						out += funcBody + "\n}\n"
-
 						ctx.DeclaredVars = savedDeclaredVars
 						ctx.Indent--
 						ctx.ScopeLevel--
-						break
-					}
-					val = line[0]
-					varName := val.Left.Data.(string)
-					if val.Right != nil && val.Right.Type == TKN_FNC && val.Right.Data == "function" {
+					} else if val.Right != nil && val.Right.Type == TKN_FNC && val.Right.Data == "function" {
+						// Inline function - handled as field
 						inlines[varName] = val.Right
 						params := val.Right.Parameters[0].Data.(string)
 						parts := strings.Split(params, ",")
-						paramStr := make([]string, len(parts))
-						for i, part := range parts {
-							parts[i] = strings.TrimSpace(part)
-							if parts[i] == "" {
+						var paramParts []string
+						for _, part := range parts {
+							part = strings.TrimSpace(part)
+							if part == "" {
 								continue
 							}
-							paramStr[i] = mapOSLTypeToGo(strings.Split(parts[i], " ")[1])
+							splitPart := strings.Split(part, " ")
+							if len(splitPart) >= 2 {
+								typeOnly := splitPart[0]
+								nameOnly := splitPart[len(splitPart)-1]
+								paramParts = append(paramParts, nameOnly+" "+mapOSLTypeToGo(typeOnly))
+							} else {
+								paramParts = append(paramParts, part+" any")
+							}
 						}
-						val.SetType = "func(" + strings.Join(paramStr, ", ") + ") " + val.Right.Returns
+						returnType := mapOSLTypeToGo(val.Right.Returns)
+						val.SetType = "func(" + strings.Join(paramParts, ", ") + ") " + returnType
 					} else {
 						defaults[varName] = val.Right
 					}
 					if val.SetType == "" {
 						val.SetType = "any"
+					}
+					if val.SetType == "*" && val.Source != "" && strings.HasPrefix(val.Source, "*") {
+						source := strings.TrimSpace(val.Source)
+						if after, ok := strings.CutPrefix(source, "*"); ok {
+							rest := after
+							rest = strings.TrimSpace(rest)
+							spaceIdx := strings.Index(rest, " ")
+							if spaceIdx > 0 {
+								typePart := rest[:spaceIdx]
+								val.SetType = "*" + typePart
+							} else if len(rest) > 0 {
+								val.SetType = "*" + rest
+							}
+						}
 					}
 					typeStr := mapOSLTypeToGo(val.SetType)
 					selfTypes[varName] = typeStr
@@ -2275,9 +2327,18 @@ func CompileCmd(cmd []*Token, ctx *VariableContext) string {
 			}
 			ctx.selfTypes = selfTypes
 			ctx.Indent--
-			out += "}\nfunc OSL_new_" + name + "() *OSL_" + name + " {\n"
+			out += "}\n"
+
+			// Generate constructor
+			if len(initParams) > 0 {
+				// Constructor with init parameters
+				out += fmt.Sprintf("func OSL_new_%v(", name) + strings.Join(initParams, ", ") + ") *OSL_" + name + " {\n"
+			} else {
+				// No init - use default constructor
+				out += "func OSL_new_" + name + "() *OSL_" + name + " {\n"
+			}
 			ctx.Indent++
-			out += AddIndent("OSLself = &OSL_"+name+"{\n", ctx.Indent*2)
+			out += AddIndent("OSLself := &OSL_"+name+"{\n", ctx.Indent*2)
 			ctx.Indent++
 			for varName, val := range defaults {
 				out += AddIndent(fmt.Sprintf("%v: %v,\n", varName, CompileToken(val, ctx)), ctx.Indent*2)
@@ -2286,6 +2347,19 @@ func CompileCmd(cmd []*Token, ctx *VariableContext) string {
 			out += AddIndent("}\n", ctx.Indent*2)
 			for varName, val := range inlines {
 				out += AddIndent(fmt.Sprintf("OSLself.%v = %v\n", varName, CompileToken(val, ctx)), ctx.Indent*2)
+			}
+			if len(initParams) > 0 {
+				out += AddIndent("OSLself.init(", ctx.Indent*2)
+				for i, paramName := range initParams {
+					paramStr := strings.Fields(strings.TrimSpace(paramName))
+					if len(paramStr) > 0 {
+						out += paramStr[0]
+						if i < len(initParams)-1 {
+							out += ", "
+						}
+					}
+				}
+				out += ")\n"
 			}
 			out += AddIndent("return OSLself\n", ctx.Indent*2)
 			ctx.Indent--

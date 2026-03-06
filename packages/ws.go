@@ -98,13 +98,13 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		send: make(chan []byte, 10),
 	}
 
-	c.onMessage = func(msg string) {
+	c.onMessage = func(c *Connection, msg string) {
 		if s.onMessage != nil {
 			s.onMessage(c, msg)
 		}
 	}
 
-	c.onClose = func() {
+	c.onClose = func(c *Connection) {
 		s.removeConnection(c)
 		if s.onDisconnect != nil {
 			s.onDisconnect(c)
@@ -215,7 +215,7 @@ func (c *Connection) Close() {
 		c.conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
 		c.conn.Close()
 		if c.onClose != nil {
-			c.onClose()
+			c.onClose(c)
 		}
 	})
 }

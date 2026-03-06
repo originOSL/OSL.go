@@ -928,6 +928,9 @@ func (utils *OSLUtils) StringToToken(cur string, param bool) *Token {
 				parts := AutoTokenise(trimmed, " ")
 				if len(parts) > 1 && paramToken.Type != TKN_BLK {
 					typePrefix = parts[0]
+					if typePrefix == "*" && len(parts) > 2 {
+						typePrefix = "*" + parts[1]
+					}
 					paramToken.SetType = typePrefix
 				}
 
@@ -1298,8 +1301,12 @@ func (utils *OSLUtils) GenerateAST(code string, start int, main bool) []*Token {
 
 			if i > 1 && len(ast) > i-2 {
 				if ast[i-2] != nil {
+					var typeData string
 					if data, ok := ast[i-2].Data.(string); ok {
-						cur.SetType = data
+						typeData = data
+					}
+					if typeData != "" {
+						cur.SetType = typeData
 						ast = append(ast[:i-2], ast[i-1:]...)
 						i--
 					}
