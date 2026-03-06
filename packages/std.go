@@ -672,31 +672,49 @@ func OSLfloor(n any) float64 {
 	}
 }
 
-func OSLtrim[F int | float64, T int | float64](s any, from F, to T) string {
-	str := []rune(OSLtoString(s))
+func OSLtrim[S string | []any, F int | float64, T int | float64](s S, from F, to T) S {
+	var items []any
+	isArr := false
 
+	if arr, ok := any(s).([]any); ok {
+		items = arr
+		isArr = true
+	} else {
+		items = make([]any, 0)
+		for _, r := range []rune(OSLtoString(s)) {
+			items = append(items, string(r))
+		}
+	}
+
+	n := len(items)
 	start := int(from) - 1
 	end := int(to)
 
 	if start < 0 {
 		start = 0
+	} else if start > n {
+		start = n
 	}
 	if end < 0 {
-		end = len(str) + end + 1
+		end = n + end + 1
 	}
-
-	if start > len(str) {
-		start = len(str)
+	if end > n {
+		end = n
+	} else if end < 0 {
+		end = 0
 	}
-	if end > len(str) {
-		end = len(str)
-	}
-
 	if start > end {
 		start, end = end, start
 	}
 
-	return string(str[start:end])
+	if isArr {
+		return any(items[start:end]).(S)
+	}
+	result := make([]rune, len(items[start:end]))
+	for i, v := range items[start:end] {
+		result[i] = []rune(v.(string))[0]
+	}
+	return any(string(result)).(S)
 }
 
 func OSLwait(seconds float64) {
