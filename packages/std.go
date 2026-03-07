@@ -175,6 +175,20 @@ func OSLlog(v any) {
 		fmt.Println("null")
 	}
 	switch v := v.(type) {
+	case *SafeMap[string, any]:
+		// Convert to regular map for JSON serialization
+		keys := v.Keys()
+		m := make(map[string]any, len(keys))
+		for _, k := range keys {
+			val, _ := v.Get(k)
+			m[k] = val
+		}
+		fmt.Println(JsonStringify(m))
+		return
+	case *SafeSlice[any]:
+		// Convert to regular slice for JSON serialization
+		fmt.Println(JsonStringify(v.Values()))
+		return
 	case map[string]any:
 		fmt.Println(JsonStringify(v))
 		return
@@ -519,6 +533,15 @@ func OSLgetItem(a any, b any) any {
 
 	if sm, ok := a.(*SafeMap[string, any]); ok {
 		val, _ := sm.Get(OSLtoString(b))
+		return val
+	}
+
+	if ss, ok := a.(*SafeSlice[any]); ok {
+		idx := OSLcastInt(b) - 1 // OSL 1-indexed
+		val, ok := ss.Get(idx)
+		if !ok {
+			return nil
+		}
 		return val
 	}
 
@@ -916,6 +939,11 @@ func OSLsetItem(a any, b any, value any) bool {
 		return true
 	}
 
+	if ss, ok := a.(*SafeSlice[any]); ok {
+		idx := OSLcastInt(b) - 1
+		return ss.Set(idx, value)
+	}
+
 	v := reflect.ValueOf(a)
 	if v.Kind() == reflect.Ptr {
 		if v.IsNil() {
@@ -1017,6 +1045,15 @@ func OSLgetKeys(a any) []any {
 		return result
 	}
 
+	if ss, ok := a.(*SafeSlice[any]); ok {
+		length := ss.Len()
+		keys := make([]any, length)
+		for i := 0; i < length; i++ {
+			keys[i] = i + 1 // OSL is 1-indexed
+		}
+		return keys
+	}
+
 	switch a := a.(type) {
 	case map[string]any:
 		keys := make([]any, len(a))
@@ -1029,7 +1066,7 @@ func OSLgetKeys(a any) []any {
 	case []any:
 		keys := make([]any, len(a))
 		for i := range a {
-			keys[i] = i
+			keys[i] = i + 1 // OSL is 1-indexed
 		}
 		return keys
 	default:
@@ -1071,6 +1108,17 @@ func OSLcontains(a any, b any) bool {
 	if sm, ok := a.(*SafeMap[string, any]); ok {
 		_, exists := sm.Get(OSLtoString(b))
 		return exists
+	}
+
+	if ss, ok := a.(*SafeSlice[any]); ok {
+		// For arrays, check if value exists
+		values := ss.Values()
+		for _, v := range values {
+			if OSLtoString(v) == OSLtoString(b) {
+				return true
+			}
+		}
+		return false
 	}
 
 	switch a := a.(type) {
@@ -1219,6 +1267,60 @@ func (m *SafeMap[K, V]) Values() []V {
 	for _, v := range m.data {
 		values = append(values, v)
 	}
+	return values
+}
+
+// SafeSlice is a thread-safe slice for global arrays
+type SafeSlice[V any] struct {
+	mu   sync.RWMutex
+	data []V
+}
+
+func NewSafeSlice[V any](defaults []V) *SafeSlice[V] {
+	ss := &SafeSlice[V]{
+		data: make([]V, len(defaults)),
+	}
+	copy(ss.data, defaults)
+	return ss
+}
+
+func (s *SafeSlice[V]) Append(value V) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.data = append(s.data, value)
+}
+
+func (s *SafeSlice[V]) Get(index int) (V, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if index < 0 || index >= len(s.data) {
+		var zero V
+		return zero, false
+	}
+	return s.data[index], true
+}
+
+func (s *SafeSlice[V]) Set(index int, value V) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if index < 0 || index >= len(s.data) {
+		return false
+	}
+	s.data[index] = value
+	return true
+}
+
+func (s *SafeSlice[V]) Len() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return len(s.data)
+}
+
+func (s *SafeSlice[V]) Values() []V {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	values := make([]V, len(s.data))
+	copy(values, s.data)
 	return values
 }
 

@@ -103,6 +103,18 @@ func isConstantExpression(token *Token) bool {
 			return true
 		}
 		return false
+	case TKN_OBJ:
+		if obj, ok := token.Data.([][]*Token); ok {
+			for _, pair := range obj {
+				for _, item := range pair {
+					if !isConstantExpression(item) {
+						return false
+					}
+				}
+			}
+			return true
+		}
+		return false
 	default:
 		return false
 	}
@@ -1102,6 +1114,7 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 			// However, variables with a type should be hoisted, but untyped variables should use globals if they exist
 			shouldHoist := ctx.Indent > 0 &&
 				!contains(ctx.HoistedVars, varName) &&
+				token.SetType != "auto" &&
 				(token.SetType != "" || !ctx.GlobalDeclaredVars[varName])
 			if shouldHoist {
 				ctx.HoistedVars = append(ctx.HoistedVars, varName)
@@ -1143,12 +1156,22 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 						compiledRight = fmt.Sprintf("bool(%v)", compiledRight)
 					}
 				case "array":
-					ctx.VariableTypes[varName] = "[]any"
+					if ctx.IsInit && ctx.Indent == 0 {
+						ctx.VariableTypes[varName] = "*SafeSlice[any]"
+						goType = "*SafeSlice[any]"
+					} else {
+						ctx.VariableTypes[varName] = "[]any"
+					}
 					if token.Right.ReturnedType != TYPE_ARR {
 						compiledRight = fmt.Sprintf("OSLcastArray(%v)", compiledRight)
 					}
 				case "object":
-					ctx.VariableTypes[varName] = "map[string]any"
+					if ctx.IsInit && ctx.Indent == 0 {
+						ctx.VariableTypes[varName] = "*SafeMap[string, any]"
+						goType = "*SafeMap[string, any]"
+					} else {
+						ctx.VariableTypes[varName] = "map[string]any"
+					}
 					if token.Right.ReturnedType != TYPE_OBJ {
 						compiledRight = fmt.Sprintf("OSLcastObject(%v)", compiledRight)
 					}
@@ -2663,8 +2686,9 @@ func CompileCmd(cmd []*Token, ctx *VariableContext) string {
 
 func CompileObject(obj [][]*Token, ctx *VariableContext) string {
 	var out strings.Builder
-	if ctx.Indent == 0 {
-		out.WriteString("newSafeMap(map[string]any{\n")
+	// Use SafeMap for global objects (IsInit) or top-level objects (Indent==0)
+	if ctx.IsInit || ctx.Indent == 0 {
+		out.WriteString("NewSafeMap(map[string]any{\n")
 	} else {
 		out.WriteString("map[string]any{\n")
 	}
@@ -2686,7 +2710,8 @@ func CompileObject(obj [][]*Token, ctx *VariableContext) string {
 			out.WriteString(AddIndent(fmt.Sprintf("%v: %v,\n", keyStr, valueStr), ctx.Indent*2))
 		}
 	}
-	if ctx.Indent == 0 {
+	// Use SafeMap for global objects (IsInit) or top-level objects (Indent==0)
+	if ctx.IsInit || ctx.Indent == 0 {
 		return out.String() + "})"
 	}
 	return out.String() + AddIndent("}", (ctx.Indent-1)*2)
@@ -2694,12 +2719,25 @@ func CompileObject(obj [][]*Token, ctx *VariableContext) string {
 
 func CompileArray(arr []*Token, ctx *VariableContext) string {
 	if len(arr) == 0 {
+		// Use SafeSlice for global empty arrays
+		if ctx.IsInit || ctx.Indent == 0 {
+			return "NewSafeSlice([]any{})"
+		}
 		return "[]any{}"
 	}
 	var out strings.Builder
-	out.WriteString("[]any{\n")
+	// Use SafeSlice for global arrays
+	if ctx.IsInit || ctx.Indent == 0 {
+		out.WriteString("NewSafeSlice([]any{\n")
+	} else {
+		out.WriteString("[]any{\n")
+	}
 	for _, token := range arr {
 		out.WriteString(AddIndent(fmt.Sprintf("%v,\n", CompileToken(token, ctx)), ctx.Indent*2))
+	}
+	// Use SafeSlice for global arrays
+	if ctx.IsInit || ctx.Indent == 0 {
+		return out.String() + "})"
 	}
 	return out.String() + AddIndent("}", (ctx.Indent-1)*2)
 }
