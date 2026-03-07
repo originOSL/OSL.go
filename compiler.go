@@ -1156,22 +1156,22 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 						compiledRight = fmt.Sprintf("bool(%v)", compiledRight)
 					}
 				case "array":
-					if ctx.IsInit && ctx.Indent == 0 {
-						ctx.VariableTypes[varName] = "*SafeSlice[any]"
-						goType = "*SafeSlice[any]"
-					} else {
-						ctx.VariableTypes[varName] = "[]any"
-					}
+					// if ctx.IsInit && ctx.Indent == 0 {
+					// 	ctx.VariableTypes[varName] = "*SafeSlice[any]"
+					//	goType = "*SafeSlice[any]"
+					// } else {
+					ctx.VariableTypes[varName] = "[]any"
+					// }
 					if token.Right.ReturnedType != TYPE_ARR {
 						compiledRight = fmt.Sprintf("OSLcastArray(%v)", compiledRight)
 					}
 				case "object":
-					if ctx.IsInit && ctx.Indent == 0 {
-						ctx.VariableTypes[varName] = "*SafeMap[string, any]"
-						goType = "*SafeMap[string, any]"
-					} else {
-						ctx.VariableTypes[varName] = "map[string]any"
-					}
+					// if ctx.IsInit && ctx.Indent == 0 {
+					// 	ctx.VariableTypes[varName] = "*SafeMap[string, any]"
+					// 	goType = "*SafeMap[string, any]"
+					// } else {
+					ctx.VariableTypes[varName] = "map[string]any"
+					// }
 					if token.Right.ReturnedType != TYPE_OBJ {
 						compiledRight = fmt.Sprintf("OSLcastObject(%v)", compiledRight)
 					}
@@ -2687,7 +2687,7 @@ func CompileCmd(cmd []*Token, ctx *VariableContext) string {
 func CompileObject(obj [][]*Token, ctx *VariableContext) string {
 	var out strings.Builder
 	// Use SafeMap for global objects (IsInit) or top-level objects (Indent==0)
-	if ctx.IsInit || ctx.Indent == 0 {
+	if false && (ctx.IsInit || ctx.Indent == 0) {
 		out.WriteString("NewSafeMap(map[string]any{\n")
 	} else {
 		out.WriteString("map[string]any{\n")
@@ -2720,14 +2720,14 @@ func CompileObject(obj [][]*Token, ctx *VariableContext) string {
 func CompileArray(arr []*Token, ctx *VariableContext) string {
 	if len(arr) == 0 {
 		// Use SafeSlice for global empty arrays
-		if ctx.IsInit || ctx.Indent == 0 {
+		if false && (ctx.IsInit || ctx.Indent == 0) {
 			return "NewSafeSlice([]any{})"
 		}
 		return "[]any{}"
 	}
 	var out strings.Builder
 	// Use SafeSlice for global arrays
-	if ctx.IsInit || ctx.Indent == 0 {
+	if false && (ctx.IsInit || ctx.Indent == 0) {
 		out.WriteString("NewSafeSlice([]any{\n")
 	} else {
 		out.WriteString("[]any{\n")
