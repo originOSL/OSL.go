@@ -1180,6 +1180,38 @@ func (utils *OSLUtils) GenerateAST(code string, start int, main bool) []*Token {
 							params = append(params, paramStr)
 						}
 					}
+
+					if len(params) == 0 && len(second.Parameters) > 1 && second.Parameters[1] != nil {
+						funcBody := second.Parameters[1]
+						if funcBody.Source != "" && strings.Contains(funcBody.Source, "def(") {
+							source := funcBody.Source
+							if strings.Contains(source, "def(") {
+								startIdx := strings.Index(source, "def(") + 4
+								depth := 0
+								for i := startIdx; i < len(source); i++ {
+									if source[i] == '(' {
+										depth++
+									} else if source[i] == ')' {
+										if depth == 0 {
+											paramStr := source[startIdx:i]
+											paramStr = strings.TrimSpace(paramStr)
+											if paramStr != "" {
+												for _, p := range strings.Split(paramStr, ",") {
+													p = strings.TrimSpace(p)
+													if p != "" {
+														params = append(params, p)
+													}
+												}
+											}
+											break
+										}
+										depth--
+									}
+								}
+							}
+						}
+					}
+
 					paramSpec := strings.Join(params, ",")
 
 					var funcBody *Token

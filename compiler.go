@@ -149,10 +149,8 @@ func processImports(ctx *VariableContext) (compiled string, goImports []string) 
 			}
 			if strings.HasSuffix(importPath, ".osl") {
 				ast := scriptToAst(string(data))
-				// Mark function declarations as declared so they don't get declared as variables
 				for _, line := range ast {
 					if len(line) > 0 {
-						// def name(...) ( body )
 						if line[0].Type == TKN_ASI {
 							if line[0].Right != nil && line[0].Right.Type == TKN_FNC &&
 								line[0].Left.Type == TKN_VAR &&
@@ -161,7 +159,6 @@ func processImports(ctx *VariableContext) (compiled string, goImports []string) 
 								continue
 							}
 						}
-						// def name(...) ( body ) - alternative syntax
 						if line[0].Type == TKN_CMD && line[0].Data == "def" {
 							if len(line) > 1 && line[1].Type == TKN_VAR {
 								ctx.DeclaredVars[line[1].Data.(string)] = true
@@ -313,7 +310,6 @@ func Compile(ast [][]*Token) string {
 
 		for _, line := range init {
 			if len(line) > 0 {
-				// Extract function assignments
 				if line[0].Type == TKN_ASI {
 					if line[0].Right != nil && line[0].Right.Type == TKN_FNC && line[0].Left.Type == TKN_VAR &&
 						line[0].Right.Data == "function" && ctx.Indent == 0 {
@@ -321,7 +317,6 @@ func Compile(ast [][]*Token) string {
 						continue
 					}
 				}
-				// Extract def commands
 				if line[0].Type == TKN_CMD && line[0].Data == "def" {
 					topLevelFuncs = append(topLevelFuncs, line)
 					continue
@@ -330,7 +325,6 @@ func Compile(ast [][]*Token) string {
 			}
 		}
 
-		// Compile the initialization first to populate global variables
 		ctx.IsInit = true
 		if ctx.GlobalVars.Len() == 0 {
 			ctx.GlobalVars = strings.Builder{}
@@ -338,7 +332,6 @@ func Compile(ast [][]*Token) string {
 		}
 		ctx.IsInit = false
 
-		// Save the global state for functions
 		ctx.GlobalDeclaredVars = make(map[string]bool)
 		maps.Copy(ctx.GlobalDeclaredVars, ctx.DeclaredVars)
 		ctx.GlobalVariableTypes = make(map[string]string)
@@ -360,13 +353,11 @@ func Compile(ast [][]*Token) string {
 			mainCompiled = funcsCompiled + initCompiled + "func main() {\n" + mainCompiled + "}\n\n"
 		}
 	} else {
-		// No mainloop: found - handle def main() style
 		var hasDefMain bool
 		var mainFunction []*Token
 
 		for _, line := range ast {
 			if len(line) > 0 {
-				// Extract def commands (but not def main - that becomes Go's main)
 				if line[0].Type == TKN_CMD && line[0].Data == "def" {
 					if len(line) > 1 && line[1].Type == TKN_VAR {
 						if line[1].Data.(string) == "main" {
@@ -378,8 +369,6 @@ func Compile(ast [][]*Token) string {
 					topLevelFuncs = append(topLevelFuncs, line)
 					continue
 				}
-				// Extract function assignments (myfunc = def() -> ())
-				// But not main = def() -> () - that becomes Go's main
 				if line[0].Type == TKN_ASI {
 					if line[0].Right != nil && line[0].Right.Type == TKN_FNC &&
 						line[0].Left.Type == TKN_VAR &&
@@ -398,22 +387,17 @@ func Compile(ast [][]*Token) string {
 		}
 
 		if !hasDefMain {
-			// No def main() found - auto-generate main() from top-level code
-			// Separate constants (global variables) from runtime code
 			constantAssignments := [][]*Token{}
 			runtimeCode := [][]*Token{}
 
 			for _, line := range initNoFuncs {
 				if len(line) > 0 {
-					// Commands (like log, each, etc.) always go to runtime
 					if line[0].Type == TKN_CMD {
 						runtimeCode = append(runtimeCode, line)
 						continue
 					}
 
-					// Check if this is a constant assignment (no function calls, just literals/variables)
 					if line[0].Type == TKN_ASI {
-						// Check if the right side is a literal or variable (not a function call)
 						isConstant := isConstantExpression(line[0].Right)
 						if isConstant {
 							constantAssignments = append(constantAssignments, line)
@@ -421,25 +405,21 @@ func Compile(ast [][]*Token) string {
 							runtimeCode = append(runtimeCode, line)
 						}
 					} else {
-						// Everything else goes to runtime
 						runtimeCode = append(runtimeCode, line)
 					}
 				}
 			}
 
-			// Compile constants as globals
 			ctx.IsInit = true
 			ctx.GlobalVars = strings.Builder{}
 			initNoFuncs = constantAssignments
 			_ = CompileBlock(initNoFuncs, ctx)
 			ctx.IsInit = false
 
-			// Compile runtime code as main function body
 			mainBody = CompileBlock(runtimeCode, ctx)
 			hasDefMain = true
 		}
 
-		// Mark all top-level function names as declared so they don't get declared as variables
 		ctx.DeclaredVars["main"] = true
 		for _, line := range topLevelFuncs {
 			if len(line) > 0 {
@@ -453,7 +433,6 @@ func Compile(ast [][]*Token) string {
 			}
 		}
 
-		// Compile initialization to populate global variables (only, no runtime code)
 		ctx.IsInit = true
 		if ctx.GlobalVars.Len() == 0 {
 			ctx.GlobalVars = strings.Builder{}
@@ -461,7 +440,6 @@ func Compile(ast [][]*Token) string {
 		}
 		ctx.IsInit = false
 
-		// Save global state for functions
 		ctx.GlobalDeclaredVars = make(map[string]bool)
 		maps.Copy(ctx.GlobalDeclaredVars, ctx.DeclaredVars)
 		ctx.GlobalVariableTypes = make(map[string]string)
@@ -469,18 +447,14 @@ func Compile(ast [][]*Token) string {
 
 		ctx.IsInit = false
 
-		// Compile all top-level functions (excluding main)
 		funcsCompiled := ""
 		if len(topLevelFuncs) > 0 {
 			funcsCompiled = CompileBlock(topLevelFuncs, ctx)
 		}
 
-		// globals go first
 		output := ctx.GlobalVars.String() + funcsCompiled
 
-		// Extract and compile the main function body directly as Go's main()
 		if mainFunction != nil {
-			// Setup hoisting for main() function
 			savedDeclaredVars := ctx.DeclaredVars
 			ctx.DeclaredVars = make(map[string]bool)
 			savedHoistedVars := ctx.HoistedVars
@@ -489,13 +463,11 @@ func Compile(ast [][]*Token) string {
 			ctx.ScopeLevel++
 
 			if mainFunction[0].Type == TKN_CMD && mainFunction[0].Data == "def" {
-				// def main() ( body )
 				if len(mainFunction) > 2 && mainFunction[2].Type == TKN_BLK {
 					blk := mainFunction[2].Data.([][]*Token)
 					mainBody = CompileBlock(blk, ctx)
 				}
 			} else if mainFunction[0].Type == TKN_ASI {
-				// main = def() ( body )
 				if mainFunction[0].Right != nil && mainFunction[0].Right.Type == TKN_FNC {
 					if len(mainFunction[0].Right.Parameters) > 1 && mainFunction[0].Right.Parameters[1] != nil {
 						if bd, ok := mainFunction[0].Right.Parameters[1].Data.([][]*Token); ok {
@@ -505,7 +477,6 @@ func Compile(ast [][]*Token) string {
 				}
 			}
 
-			// Generate variable declarations for hoisted variables in main()
 			var mainHoistDecls strings.Builder
 			if len(ctx.HoistedVars) > 0 {
 				for _, varName := range ctx.HoistedVars {
@@ -519,24 +490,19 @@ func Compile(ast [][]*Token) string {
 				}
 			}
 
-			// Restore context
 			ctx.Indent--
 			ctx.ScopeLevel--
 			ctx.DeclaredVars = savedDeclaredVars
 			ctx.HoistedVars = savedHoistedVars
 
-			// Prepend hoisted variable declarations to main body
 			mainBody = mainHoistDecls.String() + mainBody
 		}
 
-		// Generate output: functions + globals + func main() { mainBody }
 		mainCompiled = output + "func main() {\n" + mainBody + "}\n\n"
 
 		init = [][]*Token{}
 		main = [][]*Token{}
 	}
-
-	// Process imports and prepends
 
 	importsCompiled, goImports := processImports(ctx)
 
@@ -603,13 +569,12 @@ func Compile(ast [][]*Token) string {
 						continue
 					}
 					parts := strings.Split(arg, " ")
-					typeNameValue := goType // Default to receiver's type
+					typeNameValue := goType
 					varName := arg
 					if len(parts) > 1 {
-						typeNameValue = mapOSLTypeToGo(parts[0]) // parts[0] is the type
-						varName = parts[1]                       // parts[1] is the var name
+						typeNameValue = mapOSLTypeToGo(parts[0])
+						varName = parts[1]
 					}
-					// Go syntax: varName typeName
 					params_string += fmt.Sprintf("%v %v, ", varName, typeNameValue)
 				}
 			}
@@ -637,12 +602,10 @@ func Compile(ast [][]*Token) string {
 			}
 
 			hasReturn := hasReturnStatement(blockData)
-			// Methods without explicit return type always return any
 			if returnType == "" {
 				returnType = "any "
 			}
 
-			// If no return statement and return type is any, add return nil
 			if returnType == "any " && !hasReturn {
 				funcBody += AddIndent("return nil\n", ctx.Indent*2)
 			}
@@ -735,7 +698,6 @@ func collectVariableDeclarations(block [][]*Token, ctx *VariableContext) map[str
 			if line[0].Left != nil && line[0].Left.Type == TKN_VAR {
 				varName := line[0].Left.Data.(string)
 				if !savedDeclaredVars[varName] && !ctx.GlobalDeclaredVars[varName] {
-					// Skip auto type - let Go infer from assignment with :=
 					if line[0].SetType != "" && line[0].SetType != "auto" {
 						varType := mapOSLTypeToGo(line[0].SetType)
 						varDecls[varName] = varType
@@ -757,7 +719,6 @@ func collectVariableDeclarations(block [][]*Token, ctx *VariableContext) map[str
 						}
 						varDecls[varName] = varType
 					}
-					// For auto type, don't add to varDecls - let := handle type inference
 				}
 			}
 		}
@@ -986,7 +947,6 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 
 						ctx.DeclaredVars[varName] = true
 						ctx.VariableTypes[varName] = typeName
-						// Go syntax: varName typeName
 						params_string += fmt.Sprintf("%v %v, ", varName, typeName)
 					}
 				}
@@ -1005,7 +965,6 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 				}
 			}
 
-			// Compile function body to collect hoisted variables
 			funcBody := ""
 			if blockData != nil {
 				funcBody = CompileBlock(blockData, ctx)
@@ -1015,7 +974,6 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 				}
 			}
 
-			// Generate variable declarations for hoisted variables
 			var hoistDecls strings.Builder
 			if len(ctx.HoistedVars) > 0 {
 				for _, varName := range ctx.HoistedVars {
@@ -1151,16 +1109,14 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 		}
 
 		if varName != "" {
-			// OSL has function-level scoping - all variables inside a function should be hoisted to top
-			// However, variables with a type should be hoisted, but untyped variables should use globals if they exist
 			shouldHoist := ctx.Indent > 0 &&
 				!contains(ctx.HoistedVars, varName) &&
 				token.SetType != "auto" &&
 				(token.SetType != "" || !ctx.GlobalDeclaredVars[varName])
 			if shouldHoist {
 				ctx.HoistedVars = append(ctx.HoistedVars, varName)
-				ctx.DeclaredVars[varName] = true   // Mark as declared to prevent re-declaration in same location
-				ctx.VariableTypes[varName] = "any" // Default type that will be overridden by typed vars
+				ctx.DeclaredVars[varName] = true
+				ctx.VariableTypes[varName] = "any"
 			}
 
 			declared := ctx.DeclaredVars[varName]
@@ -1197,22 +1153,12 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 						compiledRight = fmt.Sprintf("bool(%v)", compiledRight)
 					}
 				case "array":
-					// if ctx.IsInit && ctx.Indent == 0 {
-					// 	ctx.VariableTypes[varName] = "*SafeSlice[any]"
-					//	goType = "*SafeSlice[any]"
-					// } else {
 					ctx.VariableTypes[varName] = "[]any"
-					// }
 					if token.Right.ReturnedType != TYPE_ARR {
 						compiledRight = fmt.Sprintf("OSLcastArray(%v)", compiledRight)
 					}
 				case "object":
-					// if ctx.IsInit && ctx.Indent == 0 {
-					// 	ctx.VariableTypes[varName] = "*SafeMap[string, any]"
-					// 	goType = "*SafeMap[string, any]"
-					// } else {
 					ctx.VariableTypes[varName] = "map[string]any"
-					// }
 					if token.Right.ReturnedType != TYPE_OBJ {
 						compiledRight = fmt.Sprintf("OSLcastObject(%v)", compiledRight)
 					}
@@ -1227,7 +1173,6 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 				}
 				return fmt.Sprintf("%v = %v", varName, compiledRight)
 			}
-			// For hoisted variables, convert := to = at function body level
 			if contains(ctx.HoistedVars, varName) && op == ":=" {
 				op = "="
 			}
@@ -1271,8 +1216,6 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 
 			var varOut string
 			if op == ":=" {
-				// Check if variable is already declared (with a type or previously)
-				// If so, convert := to =
 				if declared || ctx.GlobalDeclaredVars[varName] || ctx.VariableTypes[varName] != "" || contains(ctx.HoistedVars, varName) {
 					varOut = fmt.Sprintf("%v = %v", varName, compiledRight)
 				} else {
@@ -1511,6 +1454,30 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 			if len(params) > 0 {
 				if params[0] != nil {
 					paramData, ok := params[0].Data.(string)
+
+					if ok && paramData == "" && token.Source != "" {
+						source := token.Source
+						if strings.Contains(source, "def(") {
+							startIdx := strings.Index(source, "def(") + 4
+							depth := 0
+							for i := startIdx; i < len(source); i++ {
+								if source[i] == '(' {
+									depth++
+								} else if source[i] == ')' {
+									if depth == 0 {
+										paramStr := source[startIdx:i]
+										paramStr = strings.TrimSpace(paramStr)
+										if paramStr != "" && paramStr != "->" && !strings.HasPrefix(paramStr, "number") && !strings.HasPrefix(paramStr, "string") && !strings.HasPrefix(paramStr, "int") && !strings.HasPrefix(paramStr, "boolean") && !strings.HasPrefix(paramStr, "array") && !strings.HasPrefix(paramStr, "object") {
+											paramData = paramStr
+										}
+										break
+									}
+									depth--
+								}
+							}
+						}
+					}
+
 					if ok && paramData != "" {
 						args := strings.Split(paramData, ",")
 						for i, arg := range args {
@@ -1542,7 +1509,6 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 			}
 
 			returns := mapOSLTypeToGo(token.Returns)
-			// Inline functions without explicit return type always return any
 			if len(params) > 1 && token.Returns == "" {
 				returns = "any"
 			} else if len(params) <= 1 {
@@ -1565,12 +1531,10 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 						ctx.selfUsed = false
 					}
 
-					// If no return statement and return type is any, add return nil
 					hasReturn := hasReturnStatement(blk.Data.([][]*Token))
 					if returns == "any " && !hasReturn {
 						inner += AddIndent("return nil\n", ctx.Indent*2)
 					}
-					// null return type means void - no implicit return needed
 					out += inner
 				}
 			}
@@ -1633,8 +1597,6 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 			nameStr := token.Data.(string)
 			_, ok := oslTypes[nameStr]
 			if ok {
-				// Built-in types (int, string, number, etc.) use cast functions
-				// int(...) -> OSLcastInt(...), string(...) -> OSLtoString(...), etc.
 				switch nameStr {
 				case "int":
 					token.ReturnedType = TYPE_INT
@@ -1868,7 +1830,7 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 					out = fmt.Sprintf("strings.ToUpper(%v)", out)
 				case "onKeyDown":
 					part.ReturnedType = TYPE_BOOL
-					out = "false" // Stub implementation
+					out = "false"
 				case "isKeyDown":
 					part.ReturnedType = TYPE_BOOL
 					out = fmt.Sprintf("window.KeyPressed(%v)", out)
@@ -2121,7 +2083,6 @@ func CompileCmd(cmd []*Token, ctx *VariableContext) string {
 			panic("Loop command requires at least 1 parameter")
 		}
 
-		// Check if this is an "each i item array" pattern (4+ arguments)
 		if len(cmd) >= 5 && cmd[1].Type == TKN_VAR && cmd[2].Type == TKN_VAR {
 			indexVar := cmd[1].Data.(string)
 			itemVar := cmd[2].Data.(string)
@@ -2140,13 +2101,11 @@ func CompileCmd(cmd []*Token, ctx *VariableContext) string {
 			ctx.VariableTypes[indexVar] = "int"
 			ctx.VariableTypes[itemVar] = "any"
 			ctx.Indent++
-			// Use 1-indexed array like OSL
 			out += fmt.Sprintf("for _%v_idx, %v := range %v {\n\t%v := _%v_idx + 1\n", indexVar, itemVar, array, indexVar, indexVar)
 			out += CompileBlock(blockData, ctx)
 			ctx.Indent--
 			out += AddIndent("}", ctx.Indent*2)
 		} else {
-			// Original "loop N" behavior
 			var iteratorVar string = "i_" + RandomString(5)
 			loopNumber := CompileToken(cmd[1], ctx)
 			blk := cmd[2]
@@ -2163,7 +2122,6 @@ func CompileCmd(cmd []*Token, ctx *VariableContext) string {
 			var loopCondition string
 			returnType := cmd[1].ReturnedType
 
-			// Try to get variable type from context if it's a variable reference
 			if cmd[1].Type == TKN_VAR {
 				if varName, ok := cmd[1].Data.(string); ok {
 					if varType, exists := ctx.VariableTypes[varName]; exists {
@@ -2305,12 +2263,11 @@ func CompileCmd(cmd []*Token, ctx *VariableContext) string {
 								typeName := "any"
 								varName := args[i]
 								if len(parts) > 1 {
-									typeName = mapOSLTypeToGo(parts[0]) // parts[0] is the type
-									varName = parts[1]                  // parts[1] is the var name
+									typeName = mapOSLTypeToGo(parts[0])
+									varName = parts[1]
 								}
 
 								ctx.DeclaredVars[varName] = true
-								// Go syntax: varName typeName
 								params_string += fmt.Sprintf("%v %v, ", varName, typeName)
 							}
 						}
@@ -2344,7 +2301,6 @@ func CompileCmd(cmd []*Token, ctx *VariableContext) string {
 						}
 						out += funcSignature + funcBody + "\n}\n"
 
-						// Check if this is the init method
 						if val.Left.Data.(string) == "init" {
 							initParams = strings.Split(strings.TrimSuffix(params_string, ", "), ", ")
 							for _, param := range initParams {
@@ -2359,7 +2315,6 @@ func CompileCmd(cmd []*Token, ctx *VariableContext) string {
 						ctx.Indent--
 						ctx.ScopeLevel--
 					} else if val.Right != nil && val.Right.Type == TKN_FNC && val.Right.Data == "function" {
-						// Inline function - handled as field
 						inlines[varName] = val.Right
 						params := val.Right.Parameters[0].Data.(string)
 						parts := strings.Split(params, ",")
@@ -2409,12 +2364,9 @@ func CompileCmd(cmd []*Token, ctx *VariableContext) string {
 			ctx.Indent--
 			out += "}\n"
 
-			// Generate constructor
 			if len(initParams) > 0 {
-				// Constructor with init parameters
 				out += fmt.Sprintf("func OSL_new_%v(", name) + strings.Join(initParams, ", ") + ") *OSL_" + name + " {\n"
 			} else {
-				// No init - use default constructor
 				out += "func OSL_new_" + name + "() *OSL_" + name + " {\n"
 			}
 			ctx.Indent++
@@ -2481,13 +2433,11 @@ func CompileCmd(cmd []*Token, ctx *VariableContext) string {
 
 		funcName := ""
 		if cmdName.Type == TKN_STR {
-			// This is a custom command
 			if name, ok := cmdName.Data.(string); ok {
 				funcName = "OSLCMD_" + name
 				ctx.CustomCommands[name] = true
 			}
 		} else if name, ok := cmdName.Data.(string); ok {
-			// This is a regular function
 			funcName = name
 		}
 
@@ -2550,7 +2500,6 @@ func CompileCmd(cmd []*Token, ctx *VariableContext) string {
 			}
 		}
 
-		// Generate variable declarations for hoisted variables
 		var hoistDecls string
 		if len(ctx.HoistedVars) > 0 {
 			for _, varName := range ctx.HoistedVars {
@@ -2689,7 +2638,6 @@ func CompileCmd(cmd []*Token, ctx *VariableContext) string {
 			cmdName = name
 		}
 
-		// Check if it's a custom command
 		if ctx.CustomCommands[cmdName] {
 			out += "OSLCMD_" + cmdName + "("
 			for i := 1; i < len(cmd); i++ {
@@ -2700,10 +2648,8 @@ func CompileCmd(cmd []*Token, ctx *VariableContext) string {
 			}
 			out += ")"
 		} else {
-			// Unknown command
 			cmdName := cmd[0].Data.(string)
 
-			// Go keywords that should not have parentheses
 			goKeywords := map[string]bool{
 				"if": true, "else": true, "for": true, "while": true,
 				"switch": true, "case": true, "default": true,
@@ -2712,7 +2658,6 @@ func CompileCmd(cmd []*Token, ctx *VariableContext) string {
 			}
 
 			if goKeywords[cmdName] {
-				// Go statement - no parentheses
 				out += cmdName
 				if len(cmd) > 1 {
 					out += " "
@@ -2724,7 +2669,6 @@ func CompileCmd(cmd []*Token, ctx *VariableContext) string {
 					}
 				}
 			} else {
-				// Function call - with parentheses
 				out += cmdName + "("
 				if len(cmd) > 1 {
 					for i := 1; i < len(cmd); i++ {
@@ -2743,7 +2687,6 @@ func CompileCmd(cmd []*Token, ctx *VariableContext) string {
 
 func CompileObject(obj [][]*Token, ctx *VariableContext) string {
 	var out strings.Builder
-	// Use SafeMap for global objects (IsInit) or top-level objects (Indent==0)
 	if false && (ctx.IsInit || ctx.Indent == 0) {
 		out.WriteString("NewSafeMap(map[string]any{\n")
 	} else {
@@ -2753,13 +2696,10 @@ func CompileObject(obj [][]*Token, ctx *VariableContext) string {
 		keyStr := ""
 		switch token[0].Type {
 		case TKN_VAR:
-			// In object literals, variable names should be treated as string keys
 			keyStr = fmt.Sprintf("\"%v\"", token[0].Data)
 		case TKN_STR:
-			// String keys should be used as-is
 			keyStr = CompileToken(token[0], ctx)
 		default:
-			// Other expressions should be evaluated and used as keys
 			keyStr = CompileToken(token[0], ctx)
 		}
 		if len(token) > 1 {
@@ -2767,7 +2707,6 @@ func CompileObject(obj [][]*Token, ctx *VariableContext) string {
 			out.WriteString(AddIndent(fmt.Sprintf("%v: %v,\n", keyStr, valueStr), ctx.Indent*2))
 		}
 	}
-	// Use SafeMap for global objects (IsInit) or top-level objects (Indent==0)
 	if ctx.IsInit || ctx.Indent == 0 {
 		return out.String() + "})"
 	}
@@ -2776,14 +2715,12 @@ func CompileObject(obj [][]*Token, ctx *VariableContext) string {
 
 func CompileArray(arr []*Token, ctx *VariableContext) string {
 	if len(arr) == 0 {
-		// Use SafeSlice for global empty arrays
 		if false && (ctx.IsInit || ctx.Indent == 0) {
 			return "NewSafeSlice([]any{})"
 		}
 		return "[]any{}"
 	}
 	var out strings.Builder
-	// Use SafeSlice for global arrays
 	if false && (ctx.IsInit || ctx.Indent == 0) {
 		out.WriteString("NewSafeSlice([]any{\n")
 	} else {
@@ -2792,7 +2729,6 @@ func CompileArray(arr []*Token, ctx *VariableContext) string {
 	for _, token := range arr {
 		out.WriteString(AddIndent(fmt.Sprintf("%v,\n", CompileToken(token, ctx)), ctx.Indent*2))
 	}
-	// Use SafeSlice for global arrays
 	if ctx.IsInit || ctx.Indent == 0 {
 		return out.String() + "})"
 	}
