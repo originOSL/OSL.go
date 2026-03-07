@@ -37,3 +37,5 @@ osl
 *.js
 build/
 .DS_Store
+
+/tests/**/*.osl

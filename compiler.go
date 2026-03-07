@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -398,8 +399,20 @@ func Compile(ast [][]*Token) string {
 					}
 
 					if line[0].Type == TKN_ASI {
-						isConstant := isConstantExpression(line[0].Right)
-						if isConstant {
+						isCompoundAssignment := false
+						if data, ok := line[0].Data.(string); ok {
+							compoundOps := []string{"+=", "-=", "*=", "/=", "%=", "=??", "++=", "--="}
+							if slices.Contains(compoundOps, data) {
+								isCompoundAssignment = true
+							}
+							if data == "++" || data == "--" {
+								isCompoundAssignment = true
+							}
+						}
+
+						if isCompoundAssignment || line[0].SetType != "" {
+							runtimeCode = append(runtimeCode, line)
+						} else if isConstantExpression(line[0].Right) {
 							constantAssignments = append(constantAssignments, line)
 						} else {
 							runtimeCode = append(runtimeCode, line)
@@ -2738,7 +2751,7 @@ func CompileArray(arr []*Token, ctx *VariableContext) string {
 func AddIndent(str string, indent int) string {
 	var out strings.Builder
 	for range indent {
-		out.WriteString(" ")
+		out.WriteString("\t")
 	}
 	out.WriteString(str)
 	return out.String()
