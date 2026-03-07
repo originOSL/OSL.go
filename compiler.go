@@ -480,6 +480,14 @@ func Compile(ast [][]*Token) string {
 
 		// Extract and compile the main function body directly as Go's main()
 		if mainFunction != nil {
+			// Setup hoisting for main() function
+			savedDeclaredVars := ctx.DeclaredVars
+			ctx.DeclaredVars = make(map[string]bool)
+			savedHoistedVars := ctx.HoistedVars
+			ctx.HoistedVars = []string{}
+			ctx.Indent++
+			ctx.ScopeLevel++
+
 			if mainFunction[0].Type == TKN_CMD && mainFunction[0].Data == "def" {
 				// def main() ( body )
 				if len(mainFunction) > 2 && mainFunction[2].Type == TKN_BLK {
@@ -496,6 +504,29 @@ func Compile(ast [][]*Token) string {
 					}
 				}
 			}
+
+			// Generate variable declarations for hoisted variables in main()
+			var mainHoistDecls strings.Builder
+			if len(ctx.HoistedVars) > 0 {
+				for _, varName := range ctx.HoistedVars {
+					var goType string
+					if ctx.VariableTypes[varName] != "" {
+						goType = ctx.VariableTypes[varName]
+					} else {
+						goType = "any"
+					}
+					mainHoistDecls.WriteString(fmt.Sprintf("\tvar %v %v\n", varName, goType))
+				}
+			}
+
+			// Restore context
+			ctx.Indent--
+			ctx.ScopeLevel--
+			ctx.DeclaredVars = savedDeclaredVars
+			ctx.HoistedVars = savedHoistedVars
+
+			// Prepend hoisted variable declarations to main body
+			mainBody = mainHoistDecls.String() + mainBody
 		}
 
 		// Generate output: functions + globals + func main() { mainBody }
@@ -930,24 +961,34 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 			params_string := ""
 			if len(token.Right.Parameters) > 0 {
 				params := token.Right.Parameters
-				args := strings.Split(params[0].Data.(string), ",")
-				for i, arg := range args {
-					args[i] = strings.TrimSpace(arg)
-					if args[i] == "" {
-						continue
-					}
-					parts := strings.Split(args[i], " ")
-					typeName := "any"
-					varName := args[i]
-					if len(parts) > 1 {
-						typeName = mapOSLTypeToGo(parts[0]) // parts[0] is the type
-						varName = parts[1]                  // parts[1] is the var name
-					}
+				paramData, ok := params[0].Data.(string)
+				if ok && paramData != "" {
+					args := strings.Split(paramData, ",")
+					for i, arg := range args {
+						args[i] = strings.TrimSpace(arg)
+						if args[i] == "" {
+							continue
+						}
 
-					ctx.DeclaredVars[varName] = true
-					ctx.VariableTypes[varName] = typeName
-					// Go syntax: varName typeName
-					params_string += fmt.Sprintf("%v %v, ", varName, typeName)
+						typeName := "any"
+						varName := args[i]
+
+						parts := strings.Fields(args[i])
+						if len(parts) == 2 {
+							for _, part := range parts {
+								if _, isType := oslTypes[part]; isType {
+									typeName = mapOSLTypeToGo(part)
+								} else {
+									varName = part
+								}
+							}
+						}
+
+						ctx.DeclaredVars[varName] = true
+						ctx.VariableTypes[varName] = typeName
+						// Go syntax: varName typeName
+						params_string += fmt.Sprintf("%v %v, ", varName, typeName)
+					}
 				}
 			}
 			params_string = strings.TrimSuffix(params_string, ", ")
@@ -984,7 +1025,7 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 					} else {
 						goType = "any"
 					}
-					hoistDecls.WriteString(fmt.Sprintf("\tvar %v %v\n", varName, goType))
+					fmt.Fprintf(&hoistDecls, "\tvar %v %v\n", varName, goType)
 				}
 			}
 
@@ -1461,24 +1502,45 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 		}
 		switch token.Data {
 		case "function":
+			ctx.Indent++
+			ctx.ScopeLevel++
+			savedDeclaredVars := ctx.DeclaredVars
+			ctx.DeclaredVars = make(map[string]bool)
+
 			var paramString strings.Builder
 			if len(params) > 0 {
-				args := strings.Split(params[0].Data.(string), ",")
-				for i, arg := range args {
-					args[i] = strings.TrimSpace(arg)
-					if args[i] == "" {
-						continue
+				if params[0] != nil {
+					paramData, ok := params[0].Data.(string)
+					if ok && paramData != "" {
+						args := strings.Split(paramData, ",")
+						for i, arg := range args {
+							args[i] = strings.TrimSpace(arg)
+							if args[i] == "" {
+								continue
+							}
+
+							typeName := "any"
+							varName := args[i]
+
+							parts := strings.Fields(args[i])
+							if len(parts) >= 2 {
+								for _, part := range parts {
+									if _, isType := oslTypes[part]; isType {
+										typeName = mapOSLTypeToGo(part)
+									} else {
+										varName = part
+									}
+								}
+							}
+
+							ctx.DeclaredVars[varName] = true
+							ctx.VariableTypes[varName] = typeName
+							fmt.Fprintf(&paramString, "%v %v, ", varName, typeName)
+						}
 					}
-					parts := strings.Split(args[i], " ")
-					typeName := "any"
-					varName := args[i]
-					if len(parts) > 1 {
-						typeName = mapOSLTypeToGo(parts[0])
-						varName = parts[1]
-					}
-					fmt.Fprintf(&paramString, "%v %v, ", varName, typeName)
 				}
 			}
+
 			returns := mapOSLTypeToGo(token.Returns)
 			// Inline functions without explicit return type always return any
 			if len(params) > 1 && token.Returns == "" {
@@ -1493,11 +1555,6 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 				funcSig = fmt.Sprintf("(func(%v) {\n", strings.TrimSuffix(paramString.String(), ", "))
 			}
 			out := funcSig
-
-			ctx.Indent++
-			ctx.ScopeLevel++
-			savedDeclaredVars := ctx.DeclaredVars
-			ctx.DeclaredVars = make(map[string]bool)
 
 			if len(params) > 1 {
 				blk := params[1]
