@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"regexp"
-	"slices"
 	"sort"
 	"strings"
 )
@@ -401,8 +400,8 @@ func Compile(ast [][]*Token) string {
 					if line[0].Type == TKN_ASI {
 						isCompoundAssignment := false
 						if data, ok := line[0].Data.(string); ok {
-							compoundOps := []string{"+=", "-=", "*=", "/=", "%=", "=??", "++=", "--="}
-							if slices.Contains(compoundOps, data) {
+							// All compound assignment operators go to runtime
+							if len(data) >= 2 && (data[len(data)-1] == '=' || data == "++=" || data == "--=") {
 								isCompoundAssignment = true
 							}
 							if data == "++" || data == "--" {
@@ -948,13 +947,14 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 						varName := args[i]
 
 						parts := strings.Fields(args[i])
-						if len(parts) == 2 {
-							for _, part := range parts {
-								if _, isType := oslTypes[part]; isType {
-									typeName = mapOSLTypeToGo(part)
-								} else {
-									varName = part
-								}
+						if len(parts) >= 2 {
+							// First part is type, last part is variable name
+							typePart := strings.Join(parts[:len(parts)-1], " ")
+							varName = parts[len(parts)-1]
+							if _, isType := oslTypes[typePart]; isType {
+								typeName = mapOSLTypeToGo(typePart)
+							} else if typePart != "" {
+								typeName = typePart
 							}
 						}
 
@@ -1047,6 +1047,8 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 			op = "+="
 		case "+=":
 			op = "+="
+		case "^=":
+			op = "^="
 		case "-=":
 			op = "-="
 		case "*=":
@@ -1055,6 +1057,9 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 			op = "/="
 		case "%=":
 			op = "%="
+		case "??=":
+			// Nullish coalescing assignment - assign if variable is null/undefined
+			op = "??="
 		case "=??":
 			return compiledRight
 		}
@@ -1125,7 +1130,7 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 			shouldHoist := ctx.Indent > 0 &&
 				!contains(ctx.HoistedVars, varName) &&
 				token.SetType != "auto" &&
-				(token.SetType != "" || !ctx.GlobalDeclaredVars[varName])
+				(token.SetType != "" || (!ctx.GlobalDeclaredVars[varName] && !ctx.DeclaredVars[varName]))
 			if shouldHoist {
 				ctx.HoistedVars = append(ctx.HoistedVars, varName)
 				ctx.DeclaredVars[varName] = true
@@ -1182,6 +1187,9 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 					return ""
 				}
 				if token.SetType == "auto" {
+					if contains(ctx.HoistedVars, varName) {
+						return fmt.Sprintf("%v = %v", varName, compiledRight)
+					}
 					return fmt.Sprintf("var %v = %v", varName, compiledRight)
 				}
 				return fmt.Sprintf("%v = %v", varName, compiledRight)
@@ -1243,7 +1251,30 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 					return ""
 				}
 			} else {
-				varOut = fmt.Sprintf("%v %v %v", varName, op, compiledRight)
+				if op == "+=" || op == "-=" || op == "*=" || op == "/=" || op == "%=" || op == "^=" || op == "??=" {
+					if token.Data == "??=" {
+						if !declared && !ctx.GlobalDeclaredVars[varName] {
+							varOut = fmt.Sprintf("var %v any = %v", varName, compiledRight)
+							ctx.DeclaredVars[varName] = true
+						} else {
+							varOut = ""
+						}
+					} else if token.Data == "++=" {
+						varOut = fmt.Sprintf("%v = %v + %v", varName, varName, compiledRight)
+					} else if token.Data == "^=" {
+						varOut = fmt.Sprintf("%v = OSLpow(%v, %v)", varName, varName, compiledRight)
+					} else if op == "+=" {
+						if token.Right != nil && (token.Right.Type == TKN_STR || token.Right.ReturnedType == TYPE_STR) {
+							varOut = fmt.Sprintf("%v = OSLjoin(%v, %v)", varName, varName, compiledRight)
+						} else {
+							varOut = fmt.Sprintf("%v += %v", varName, compiledRight)
+						}
+					} else {
+						varOut = fmt.Sprintf("%v %v %v", varName, op, compiledRight)
+					}
+				} else {
+					varOut = fmt.Sprintf("%v %v %v", varName, op, compiledRight)
+				}
 			}
 			return varOut
 		}
@@ -1291,12 +1322,15 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 			return fmt.Sprintf("OSLdivide(%v, %v)", compiledLeft, compiledRight)
 		case "%":
 			return fmt.Sprintf("OSLmod(%v, %v)", compiledLeft, compiledRight)
+		case "^":
+			token.ReturnedType = TYPE_NUM
+			return fmt.Sprintf("OSLpow(%v, OSLcastNumber(%v))", compiledLeft, compiledRight)
 		case "++":
 			if isAbsolutelyNot(LT, TYPE_ARR) || isAbsolutelyNot(RT, TYPE_ARR) {
 				token.ReturnedType = TYPE_STR
 				return fmt.Sprintf("(%v + %v)", OSLcastToString(compiledLeft, LT), OSLcastToString(compiledRight, RT))
 			}
-			return fmt.Sprintf("OSLjoin(%v, %v)", compiledLeft, compiledRight)
+			return fmt.Sprintf("OSLconcat(%v, %v)", compiledLeft, compiledRight)
 		}
 		return fmt.Sprintf("%v %v %v", compiledLeft, token.Data, compiledRight)
 	case TKN_EVL:
@@ -1348,8 +1382,17 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 		}
 		return fmt.Sprintf("%v %v %v", left, op, right)
 	case TKN_BIT:
-		token.ReturnedType = TYPE_BOOL
-		return fmt.Sprintf("%v %v %v", CompileToken(token.Left, ctx), token.Data, CompileToken(token.Right, ctx))
+		left := CompileToken(token.Left, ctx)
+		right := CompileToken(token.Right, ctx)
+		switch token.Data {
+		case "^^":
+			token.ReturnedType = TYPE_INT
+			return fmt.Sprintf("int(OSLxor(int(%v), int(%v)))", left, right)
+		case "&", "|", "<<", ">>":
+			token.ReturnedType = TYPE_INT
+			return fmt.Sprintf("%v %s %v", left, token.Data, right)
+		}
+		return fmt.Sprintf("%v %v %v", left, token.Data, right)
 	case TKN_STR:
 		token.ReturnedType = TYPE_STR
 		return JsonStringify(token.Data)
@@ -1504,12 +1547,14 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 
 							parts := strings.Fields(args[i])
 							if len(parts) >= 2 {
-								for _, part := range parts {
-									if _, isType := oslTypes[part]; isType {
-										typeName = mapOSLTypeToGo(part)
-									} else {
-										varName = part
-									}
+								// First part is type, last part is variable name
+								typePart := strings.Join(parts[:len(parts)-1], " ")
+								varName = parts[len(parts)-1]
+								if _, isType := oslTypes[typePart]; isType {
+									typeName = mapOSLTypeToGo(typePart)
+								} else if typePart != "" {
+									// External type like *gin.Context
+									typeName = typePart
 								}
 							}
 
@@ -1522,8 +1567,34 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 			}
 
 			returns := mapOSLTypeToGo(token.Returns)
-			if len(params) > 1 && token.Returns == "" {
-				returns = "any"
+			if token.Returns == "null" {
+				// Explicit null return type means no return
+				returns = ""
+			} else if len(params) > 1 && token.Returns == "" {
+				// Check if the block contains only statements (no return)
+				blk := params[1]
+				if blk != nil && blk.Type == TKN_BLK {
+					if blkData, ok := blk.Data.([][]*Token); ok {
+						// Check if any statement is an explicit return
+						hasExplicitReturn := false
+						for _, line := range blkData {
+							if len(line) > 0 && line[0].Type == TKN_CMD && line[0].Data == "return" {
+								hasExplicitReturn = true
+								break
+							}
+						}
+						if !hasExplicitReturn {
+							// No explicit return, so don't add a return type
+							returns = ""
+						} else {
+							returns = "any"
+						}
+					} else {
+						returns = "any"
+					}
+				} else {
+					returns = "any"
+				}
 			} else if len(params) <= 1 {
 				returns = "any"
 			}
@@ -1923,6 +1994,9 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 					} else if len(params) > 0 {
 						out = fmt.Sprintf("OSLslice(%v, %v, -1)", out, params[0])
 					}
+				case "sign":
+					part.ReturnedType = TYPE_STR
+					out = fmt.Sprintf("OSLsign(%v)", out)
 				case "trim":
 					if len(params) > 1 {
 						out = fmt.Sprintf("OSLtrim(%v, %v, %v)", out, params[0], params[1])
@@ -2467,10 +2541,22 @@ func CompileCmd(cmd []*Token, ctx *VariableContext) string {
 			cmdParams := cmd[2]
 			switch cmdParams.Type {
 			case TKN_STR:
-				paramString.WriteString(fmt.Sprintf("%v any", cmdParams.Data))
-				if name, ok := cmdName.Data.(string); ok {
-					ctx.DeclaredVars[name] = true
+				paramStr := cmdParams.Data.(string)
+				parts := strings.SplitN(strings.TrimSpace(paramStr), " ", 2)
+				varName := paramStr
+				goType := "any"
+				if len(parts) == 2 {
+					typePart := parts[0]
+					varName = parts[1]
+					if _, isType := oslTypes[typePart]; isType {
+						goType = mapOSLTypeToGo(typePart)
+					} else if typePart != "" {
+						goType = typePart
+					}
 				}
+				ctx.DeclaredVars[varName] = true
+				ctx.VariableTypes[varName] = goType
+				paramString.WriteString(fmt.Sprintf("%v %v", varName, goType))
 			case TKN_MTV:
 				fields := cmdParams.Data.([]*Token)
 				for i, f := range fields {
@@ -2482,9 +2568,13 @@ func CompileCmd(cmd []*Token, ctx *VariableContext) string {
 						varName := s
 						goType := "any"
 						if len(parts) == 2 {
-							oslType := parts[0]
+							typePart := parts[0]
 							varName = parts[1]
-							goType = mapOSLTypeToGo(oslType)
+							if _, isType := oslTypes[typePart]; isType {
+								goType = mapOSLTypeToGo(typePart)
+							} else if typePart != "" {
+								goType = typePart
+							}
 							ctx.DeclaredVars[varName] = true
 							ctx.VariableTypes[varName] = goType
 						} else {

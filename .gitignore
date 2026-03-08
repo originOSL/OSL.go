@@ -34,7 +34,6 @@ go.work.sum
 osl
 
 *.json
-*.js
 build/
 .DS_Store
 

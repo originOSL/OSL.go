@@ -609,11 +609,39 @@ func OSLjoin[T string | []any, T2 string | []any](a T, b T2) T {
 		}
 	}
 
+	return any(OSLtoString(a) + " " + OSLtoString(b)).(T)
+}
+
+func OSLconcat[T string | []any, T2 string | []any](a T, b T2) T {
+	switch aSlice := any(a).(type) {
+	case []any:
+		switch bVal := any(b).(type) {
+		case []any:
+			return any(append(aSlice, bVal...)).(T)
+		}
+	}
+
 	return any(OSLtoString(a) + OSLtoString(b)).(T)
 }
 
 func OSLadd[T float64 | int](a T, b T) T {
 	return T(OSLcastNumber(a) + OSLcastNumber(b))
+}
+
+func OSLcompoundAdd(a, b any) any {
+	// Handle += for both strings (add space) and numbers
+	// Returns the result in the same type as 'a'
+	switch a.(type) {
+	case string:
+		return OSLtoString(a) + " " + OSLtoString(b)
+	case float64:
+		return OSLcastNumber(a) + OSLcastNumber(b)
+	case int:
+		return int(OSLcastNumber(a) + OSLcastNumber(b))
+	default:
+		// For any other type, try numeric addition
+		return OSLcastNumber(a) + OSLcastNumber(b)
+	}
 }
 
 func OSLsub[T float64 | int](a T, b T) T {
@@ -742,6 +770,24 @@ func OSLtrim[S string | []any, F int | float64, T int | float64](s S, from F, to
 
 func OSLwait(seconds float64) {
 	time.Sleep(time.Duration(seconds) * time.Second)
+}
+
+func OSLsign(n any) string {
+	num := OSLcastNumber(n)
+	if num < 0 {
+		return "-"
+	} else if num > 0 {
+		return "+"
+	}
+	return "+"
+}
+
+func OSLpow[T int | float64, F int | float64](base T, exp F) T {
+	return T(math.Pow(float64(base), float64(exp)))
+}
+
+func OSLxor(a, b int) int {
+	return a ^ b
 }
 
 func OSLslice(s any, start int, end int) []any {
@@ -1352,4 +1398,3 @@ func btoa(data string) string {
 	encoded := base64.StdEncoding.EncodeToString([]byte(data))
 	return encoded
 }
-

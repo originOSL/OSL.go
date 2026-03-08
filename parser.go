@@ -932,6 +932,15 @@ func (utils *OSLUtils) StringToToken(cur string, param bool) *Token {
 						typePrefix = "*" + parts[1]
 					}
 					paramToken.SetType = typePrefix
+				} else if len(parts) > 1 && paramToken.Type == TKN_BLK {
+					// Handle type annotations like "*gin.Context c"
+					// where GenerateAST returns a complex structure
+					// Just create a simple string token with the full parameter spec
+					paramToken = &Token{
+						Type:   TKN_STR,
+						Data:   trimmed,
+						Source: trimmed,
+					}
 				}
 
 				parsedParams = append(parsedParams, paramToken)
