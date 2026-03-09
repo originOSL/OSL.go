@@ -2810,9 +2810,6 @@ func CompileObject(obj [][]*Token, ctx *VariableContext) string {
 			out.WriteString(AddIndent(fmt.Sprintf("%v: %v,\n", keyStr, valueStr), ctx.Indent*2))
 		}
 	}
-	if ctx.IsInit || ctx.Indent == 0 {
-		return out.String() + "})"
-	}
 	return out.String() + AddIndent("}", (ctx.Indent-1)*2)
 }
 
@@ -2831,9 +2828,6 @@ func CompileArray(arr []*Token, ctx *VariableContext) string {
 	}
 	for _, token := range arr {
 		out.WriteString(AddIndent(fmt.Sprintf("%v,\n", CompileToken(token, ctx)), ctx.Indent*2))
-	}
-	if ctx.IsInit || ctx.Indent == 0 {
-		return out.String() + "})"
 	}
 	return out.String() + AddIndent("}", (ctx.Indent-1)*2)
 }
