@@ -3,14 +3,37 @@
 // author: Mist
 // requires: github.com/gorilla/websocket, crypto/tls, log, sync, net/http
 
+const (
+	// connSendBuffer is the number of outbound messages buffered per connection
+	// before drops occur. 256 handles bursts without consuming excessive memory.
+	connSendBuffer = 256
+
+	// connWorkBuffer is the number of inbound messages queued for the worker pool.
+	connWorkBuffer = 256
+
+	// connWorkers is the number of concurrent message handlers per connection.
+	connWorkers = 4
+)
+
+// jsonPool reuses byte buffers for JSON serialisation to reduce allocations
+// on hot send paths.
+var jsonPool = sync.Pool{
+	New: func() any {
+		b := make([]byte, 0, 512)
+		return &b
+	},
+}
+
 type Connection struct {
 	url       string
 	conn      *websocket.Conn
 	send      chan []byte
+	work      chan string
 	closeOnce sync.Once
+	closed    bool
+	closeMu   sync.RWMutex
 
-	dataMutex sync.RWMutex
-	data      map[string]any
+	data sync.Map // replaces dataMutex + map — lock-free reads/writes
 
 	onMessage func(*Connection, string)
 	onClose   func(*Connection)
@@ -36,10 +59,11 @@ func (WS) Connect(url string, protocols ...string) *Connection {
 	c := &Connection{
 		url:  url,
 		conn: conn,
-		data: map[string]any{},
-		send: make(chan []byte, 10),
+		send: make(chan []byte, connSendBuffer),
+		work: make(chan string, connWorkBuffer),
 	}
 
+	c.startWorkers()
 	go c.readLoop()
 	go c.writeLoop()
 
@@ -47,12 +71,11 @@ func (WS) Connect(url string, protocols ...string) *Connection {
 }
 
 type Server struct {
-	addr        string
-	path        string
-	upgrader    websocket.Upgrader
-	connections map[*Connection]bool
-	connMutex   sync.RWMutex
-	server      *http.Server
+	addr     string
+	path     string
+	upgrader websocket.Upgrader
+	conns    sync.Map // map[*Connection]struct{} — lock-free connection tracking
+	server   *http.Server
 
 	onConnect    func(*Connection)
 	onMessage    func(*Connection, string)
@@ -61,9 +84,8 @@ type Server struct {
 
 func (WS) NewServer(addr, path string) *Server {
 	return &Server{
-		addr:        addr,
-		path:        path,
-		connections: make(map[*Connection]bool),
+		addr: addr,
+		path: path,
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool {
 				return true
@@ -87,15 +109,15 @@ func (s *Server) OnDisconnect(handler func(*Connection)) {
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	conn, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Println("upgrade error:", err)
+		log.Println("ws: upgrade error:", err)
 		return
 	}
 
 	c := &Connection{
 		url:  r.RemoteAddr,
 		conn: conn,
-		data: map[string]any{},
-		send: make(chan []byte, 10),
+		send: make(chan []byte, connSendBuffer),
+		work: make(chan string, connWorkBuffer),
 	}
 
 	c.onMessage = func(c *Connection, msg string) {
@@ -105,51 +127,41 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 
 	c.onClose = func(c *Connection) {
-		s.removeConnection(c)
+		s.conns.Delete(c)
 		if s.onDisconnect != nil {
 			s.onDisconnect(c)
 		}
 	}
 
-	s.addConnection(c)
+	s.conns.Store(c, struct{}{})
 
 	if s.onConnect != nil {
 		s.onConnect(c)
 	}
 
+	c.startWorkers()
 	go c.readLoop()
 	go c.writeLoop()
 }
 
-func (s *Server) addConnection(c *Connection) {
-	s.connMutex.Lock()
-	defer s.connMutex.Unlock()
-	s.connections[c] = true
-}
-
-func (s *Server) removeConnection(c *Connection) {
-	s.connMutex.Lock()
-	defer s.connMutex.Unlock()
-	delete(s.connections, c)
-}
-
+// Broadcast sends a message to every connected client. The connection list is
+// snapshotted without holding any lock during the actual sends, so a slow or
+// closing connection cannot stall other recipients.
 func (s *Server) Broadcast(message string) {
-	s.connMutex.RLock()
-	defer s.connMutex.RUnlock()
-
-	for conn := range s.connections {
-		conn.Send(message)
-	}
+	data := []byte(message)
+	s.conns.Range(func(key, _ any) bool {
+		conn := key.(*Connection)
+		conn.sendBytes(data)
+		return true
+	})
 }
 
 func (s *Server) GetConnections() []*Connection {
-	s.connMutex.RLock()
-	defer s.connMutex.RUnlock()
-
-	conns := make([]*Connection, 0, len(s.connections))
-	for conn := range s.connections {
-		conns = append(conns, conn)
-	}
+	var conns []*Connection
+	s.conns.Range(func(key, _ any) bool {
+		conns = append(conns, key.(*Connection))
+		return true
+	})
 	return conns
 }
 
@@ -162,7 +174,7 @@ func (s *Server) Start() error {
 		Handler: mux,
 	}
 
-	log.Printf("WebSocket server starting on %s%s", s.addr, s.path)
+	log.Printf("ws: server starting on %s%s", s.addr, s.path)
 	return s.server.ListenAndServe()
 }
 
@@ -175,7 +187,7 @@ func (s *Server) StartTLS(certFile, keyFile string) error {
 		Handler: mux,
 	}
 
-	log.Printf("WebSocket server (TLS) starting on %s%s", s.addr, s.path)
+	log.Printf("ws: server (TLS) starting on %s%s", s.addr, s.path)
 	return s.server.ListenAndServeTLS(certFile, keyFile)
 }
 
@@ -184,79 +196,106 @@ func (s *Server) Stop() error {
 		return nil
 	}
 
-	// Close all connections
-	s.connMutex.Lock()
-	for conn := range s.connections {
-		conn.Close()
-	}
-	s.connMutex.Unlock()
+	// Close all connections. sync.Map.Range is safe to call concurrently with
+	// Delete (which onClose will call), so no lock needed here.
+	s.conns.Range(func(key, _ any) bool {
+		key.(*Connection).Close()
+		return true
+	})
 
 	return s.server.Close()
 }
 
 // Connection methods (shared by client and server)
 
+// Send serialises and enqueues a message. It is safe to call from multiple
+// goroutines concurrently.
 func (c *Connection) Send(message any) {
 	var data []byte
 	switch v := message.(type) {
 	case string:
 		data = []byte(v)
+	case []byte:
+		data = v
 	case map[string]any:
-		data = []byte(JsonStringify(v))
+		buf := jsonPool.Get().(*[]byte)
+		*buf = []byte(JsonStringify(v))
+		data = append([]byte(nil), *buf...) // copy before returning to pool
+		*buf = (*buf)[:0]
+		jsonPool.Put(buf)
 	case []any:
-		data = []byte(JsonStringify(v))
+		buf := jsonPool.Get().(*[]byte)
+		*buf = []byte(JsonStringify(v))
+		data = append([]byte(nil), *buf...)
+		*buf = (*buf)[:0]
+		jsonPool.Put(buf)
 	default:
-		panic("Invalid message type: " + reflect.TypeOf(message).String())
+		log.Println("ws: invalid message type:", reflect.TypeOf(message).String())
+		return
+	}
+	c.sendBytes(data)
+}
+
+// sendBytes is the internal hot path. Holding closeMu.RLock for the full
+// duration closes the race window between the closed-check and channel write.
+func (c *Connection) sendBytes(data []byte) {
+	c.closeMu.RLock()
+	defer c.closeMu.RUnlock()
+
+	if c.closed {
+		return
 	}
 
 	select {
 	case c.send <- data:
 	default:
-		log.Println("send buffer full, dropping message")
+		log.Println("ws: send buffer full, dropping message")
 	}
 }
 
 func (c *Connection) Close() {
 	c.closeOnce.Do(func() {
+		// Write lock ensures all in-progress sendBytes calls finish before we
+		// mark closed and close the channel.
+		c.closeMu.Lock()
+		c.closed = true
 		close(c.send)
+		c.closeMu.Unlock()
+
+		// Close the work channel so worker goroutines exit cleanly.
+		close(c.work)
+
 		c.conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
 		c.conn.Close()
+
 		if c.onClose != nil {
 			go c.onClose(c)
 		}
 	})
 }
 
+// Set stores an arbitrary value on the connection. Uses sync.Map for
+// lock-free concurrent access.
 func (c *Connection) Set(key string, value any) {
-	c.dataMutex.Lock()
-	defer c.dataMutex.Unlock()
-	c.data[key] = value
+	c.data.Store(key, value)
 }
 
 func (c *Connection) Get(key string) any {
-	c.dataMutex.RLock()
-	defer c.dataMutex.RUnlock()
-	val, ok := c.data[key]
-	if !ok {
-		return nil
-	}
+	val, _ := c.data.Load(key)
 	return val
 }
 
 func (c *Connection) Delete(key string) {
-	c.dataMutex.Lock()
-	defer c.dataMutex.Unlock()
-	delete(c.data, key)
+	c.data.Delete(key)
 }
 
 func (c *Connection) GetAll() map[string]any {
-	c.dataMutex.RLock()
-	defer c.dataMutex.RUnlock()
-	copy := make(map[string]any, len(c.data))
-	for k, v := range c.data {
-		copy[k] = v
-	}
-	return copy
+	result := make(map[string]any)
+	c.data.Range(func(k, v any) bool {
+		result[k.(string)] = v
+		return true
+	})
+	return result
 }
 
 func (c *Connection) OnMessage(handler func(*Connection, string)) {
@@ -267,26 +306,44 @@ func (c *Connection) OnClose(handler func(*Connection)) {
 	c.onClose = handler
 }
 
+// startWorkers launches a fixed pool of goroutines that drain the work channel.
+// This bounds concurrency for message handling instead of spawning an unbounded
+// number of goroutines (one per message).
+func (c *Connection) startWorkers() {
+	for i := 0; i < connWorkers; i++ {
+		go func() {
+			for msg := range c.work {
+				if c.onMessage != nil {
+					c.onMessage(c, msg)
+				}
+			}
+		}()
+	}
+}
+
 func (c *Connection) readLoop() {
 	defer c.Close()
 	for {
 		_, message, err := c.conn.ReadMessage()
 		if err != nil {
-			log.Println("read error:", err)
+			log.Println("ws: read error:", err)
 			return
 		}
 		if c.onMessage != nil {
-			msg := string(message)
-			go c.onMessage(c, msg)
+			select {
+			case c.work <- string(message):
+			default:
+				log.Println("ws: work queue full, dropping message")
+			}
 		}
 	}
 }
 
 func (c *Connection) writeLoop() {
+	defer c.Close()
 	for msg := range c.send {
-		err := c.conn.WriteMessage(websocket.TextMessage, msg)
-		if err != nil {
-			log.Println("write error:", err)
+		if err := c.conn.WriteMessage(websocket.TextMessage, msg); err != nil {
+			log.Println("ws: write error:", err)
 			return
 		}
 	}
