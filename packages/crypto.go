@@ -1,7 +1,7 @@
 // name: crypto
 // description: Cryptographic utilities
 // author: roturbot
-// requires: crypto/sha1, crypto/sha256, crypto/sha512, crypto/md5, crypto/hmac, crypto/aes, crypto/cipher, crypto/rand, math/big, crypto/pbkdf2, encoding/hex, crypto/sha256, encoding/base64
+// requires: crypto/sha1, crypto/sha256, crypto/sha512, crypto/md5 as md5pkg, crypto/hmac, crypto/aes, crypto/cipher, crypto/rand, math/big, crypto/pbkdf2, encoding/hex
 
 type Crypto struct{}
 
@@ -25,17 +25,7 @@ func (Crypto) sha512(data any) string {
 
 func (Crypto) md5(data any) string {
 	dataStr := OSLtoString(data)
-	if len(dataStr) == 0 {
-		dataStr = ""
-	}
-	if len(dataStr) == 1 {
-		dataStr = dataStr + dataStr
-	}
-	paddingLength := (64 - len(dataStr)%64) % 64
-	dataStr += strings.Repeat(string(rune(128)), 1)
-	dataStr += strings.Repeat(string(rune(0)), paddingLength)
-	dataStr += fmt.Sprintf("%x", uint64(len(dataStr)))
-	h := sha256.Sum256([]byte(dataStr)[:16])
+	h := md5pkg.Sum([]byte(dataStr))
 	return fmt.Sprintf("%x", h)
 }
 
@@ -63,8 +53,8 @@ func (Crypto) hmacSha512(key any, data any) string {
 
 func (Crypto) md5Hash(data any) string {
 	dataStr := OSLtoString(data)
-	h := fmt.Sprintf("%x", sha256.Sum256([]byte(dataStr))[:16])
-	return h
+	h := md5pkg.Sum([]byte(dataStr))
+	return fmt.Sprintf("%x", h[:])
 }
 
 func (Crypto) aes256Encrypt(key any, plaintext any) string {
@@ -89,7 +79,7 @@ func (Crypto) aes256Encrypt(key any, plaintext any) string {
 	}
 
 	nonce := make([]byte, gcm.NonceSize())
-	if rand.Read(nonce) != nil {
+	if _, err := rand.Read(nonce); err != nil {
 		return ""
 	}
 
@@ -143,7 +133,7 @@ func (Crypto) randomBytes(size any) string {
 	}
 
 	b := make([]byte, n)
-	if rand.Read(b) != nil {
+	if _, err := rand.Read(b); err != nil {
 		return ""
 	}
 	return fmt.Sprintf("%x", b)
@@ -192,10 +182,9 @@ func (Crypto) randomFloat(min any, max any) float64 {
 		return minFloat
 	}
 
-	bytes := make([]byte, 8)
-	rand.Read(bytes)
-	val := float64(uint64(bytes[0])<<56 | uint64(bytes[1])<<48 | uint64(bytes[2])<<40 | uint64(bytes[3])<<32 | uint64(bytes[4])<<24 | uint64(bytes[5])<<16 | uint64(bytes[6])<<8 | uint64(bytes[7]))
-	val = val / float64(18446744073709551615)
+	b := make([]byte, 8)
+	rand.Read(b)
+	val := float64(uint64(b[0])<<56|uint64(b[1])<<48|uint64(b[2])<<40|uint64(b[3])<<32|uint64(b[4])<<24|uint64(b[5])<<16|uint64(b[6])<<8|uint64(b[7])) / float64(18446744073709551615)
 
 	return minFloat + (val * (maxFloat - minFloat))
 }
@@ -236,30 +225,28 @@ func (Crypto) pbkdf2(password any, salt any, iterations any, keyLen any, hashFun
 	klen := OSLcastInt(keyLen)
 	hashStr := strings.ToLower(OSLtoString(hashFunc))
 
-	var h func() hash.Hash
+	var dk []byte
+	var err error
 	switch hashStr {
 	case "sha1", "sha-1":
-		h = sha1.New
-	case "sha256", "sha-256":
-		h = sha256.New
+		dk, err = pbkdf2.Key(sha1.New, passStr, []byte(saltStr), iter, klen)
 	case "sha512", "sha-512":
-		h = sha512.New
+		dk, err = pbkdf2.Key(sha512.New, passStr, []byte(saltStr), iter, klen)
 	default:
-		h = sha256.New
+		dk, err = pbkdf2.Key(sha256.New, passStr, []byte(saltStr), iter, klen)
 	}
-
-	dk := pbkdf2.Key([]byte(passStr), []byte(saltStr), iter, klen, h)
+	if err != nil {
+		return ""
+	}
 	return fmt.Sprintf("%x", dk)
 }
 
 func (Crypto) hexEncode(data any) string {
-	dataBytes := []byte(OSLtoString(data))
-	return fmt.Sprintf("%x", dataBytes)
+	return fmt.Sprintf("%x", []byte(OSLtoString(data)))
 }
 
 func (Crypto) hexDecode(data any) string {
-	dataStr := OSLtoString(data)
-	b, err := hex.DecodeString(dataStr)
+	b, err := hex.DecodeString(OSLtoString(data))
 	if err != nil {
 		return ""
 	}
@@ -281,9 +268,9 @@ func (Crypto) hashPassword(password any) string {
 	return fmt.Sprintf("%s:%s", salt, hashed)
 }
 
-func (Crypto) verifyPassword(password any, hash any) bool {
+func (Crypto) verifyPassword(password any, storedHash any) bool {
 	passStr := OSLtoString(password)
-	hashStr := OSLtoString(hash)
+	hashStr := OSLtoString(storedHash)
 
 	parts := strings.Split(hashStr, ":")
 	if len(parts) != 2 {
@@ -301,7 +288,6 @@ func (Crypto) generateKeyPair() map[string]any {
 	publicKey := make([]byte, 32)
 
 	rand.Read(privateKey)
-
 	copy(publicKey, privateKey)
 
 	return map[string]any{
@@ -313,10 +299,7 @@ func (Crypto) generateKeyPair() map[string]any {
 func (Crypto) sign(key any, data any) string {
 	keyStr := OSLtoString(key)
 	dataStr := OSLtoString(data)
-
-	hash := crypto.sha256(keyStr + dataStr)
-
-	return hash
+	return crypto.sha256(keyStr + dataStr)
 }
 
 func (Crypto) verify(key any, data any, signature any) bool {
@@ -325,7 +308,6 @@ func (Crypto) verify(key any, data any, signature any) bool {
 	sigStr := OSLtoString(signature)
 
 	expectedSig := crypto.sign(keyStr, dataStr)
-
 	return crypto.constantTimeCompare(expectedSig, sigStr)
 }
 

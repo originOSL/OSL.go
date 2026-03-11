@@ -1,7 +1,7 @@
 // name: ws
 // description: websocket package for osl
 // author: Mist
-// requires: github.com/gorilla/websocket, crypto/tls, log, sync, net/http
+// requires: github.com/gorilla/websocket, crypto/tls, log, sync, net/http, time
 
 const (
 	// connSendBuffer is the number of outbound messages buffered per connection
@@ -32,6 +32,8 @@ type Connection struct {
 	closeOnce sync.Once
 	closed    bool
 	closeMu   sync.RWMutex
+
+	reconnect bool // set by EnableReconnect()
 
 	data sync.Map // replaces dataMutex + map — lock-free reads/writes
 
@@ -255,23 +257,67 @@ func (c *Connection) sendBytes(data []byte) {
 
 func (c *Connection) Close() {
 	c.closeOnce.Do(func() {
-		// Write lock ensures all in-progress sendBytes calls finish before we
-		// mark closed and close the channel.
 		c.closeMu.Lock()
 		c.closed = true
 		close(c.send)
 		c.closeMu.Unlock()
 
-		// Close the work channel so worker goroutines exit cleanly.
 		close(c.work)
 
 		c.conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
 		c.conn.Close()
 
+		if c.reconnect {
+			go c.reconnectLoop()
+			return
+		}
 		if c.onClose != nil {
 			go c.onClose(c)
 		}
 	})
+}
+
+// EnableReconnect makes the connection automatically reconnect with exponential
+// backoff (1s→2s→4s…30s cap) whenever the server drops it. The same
+// *Connection handle stays valid — OnMessage/OnClose only need to be set once.
+func (c *Connection) EnableReconnect() {
+	c.reconnect = true
+}
+
+func (c *Connection) reconnectLoop() {
+	dialer := websocket.Dialer{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+	}
+	delay := time.Second
+	for {
+		time.Sleep(delay)
+		log.Printf("ws: reconnecting to %s", c.url)
+		conn, _, err := dialer.Dial(c.url, nil)
+		if err != nil {
+			log.Printf("ws: reconnect failed: %v (retry in %v)", err, delay)
+			delay *= 2
+			if delay > 30*time.Second {
+				delay = 30 * time.Second
+			}
+			continue
+		}
+		// reset state for the new underlying connection
+		c.closeMu.Lock()
+		c.conn = conn
+		c.send = make(chan []byte, connSendBuffer)
+		c.work = make(chan string, connWorkBuffer)
+		c.closed = false
+		c.closeOnce = sync.Once{}
+		c.closeMu.Unlock()
+
+		delay = time.Second // reset backoff on success
+		log.Printf("ws: reconnected to %s", c.url)
+
+		c.startWorkers()
+		go c.readLoop()
+		go c.writeLoop()
+		return
+	}
 }
 
 // Set stores an arbitrary value on the connection. Uses sync.Map for
@@ -300,6 +346,18 @@ func (c *Connection) GetAll() map[string]any {
 
 func (c *Connection) OnMessage(handler func(*Connection, string)) {
 	c.onMessage = handler
+	// Drain any messages that arrived before the handler was registered.
+	for {
+		select {
+		case msg, ok := <-c.work:
+			if !ok {
+				return
+			}
+			go handler(c, msg)
+		default:
+			return
+		}
+	}
 }
 
 func (c *Connection) OnClose(handler func(*Connection)) {
@@ -329,12 +387,10 @@ func (c *Connection) readLoop() {
 			log.Println("ws: read error:", err)
 			return
 		}
-		if c.onMessage != nil {
-			select {
-			case c.work <- string(message):
-			default:
-				log.Println("ws: work queue full, dropping message")
-			}
+		select {
+		case c.work <- string(message):
+		default:
+			log.Println("ws: work queue full, dropping message")
 		}
 	}
 }

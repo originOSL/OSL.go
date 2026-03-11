@@ -525,6 +525,7 @@ func Compile(ast [][]*Token) string {
 
 	if len(goImports) > 0 {
 		seen := make(map[string]bool)
+		seen["encoding/base64"] = true
 		var uniqueImports []string
 
 		for _, pkg := range goImports {
