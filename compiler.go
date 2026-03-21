@@ -557,7 +557,7 @@ func Compile(ast [][]*Token) string {
 		prepend.WriteString("var OSLwincreatetime float64 = OSLcastNumber(time.Now().UnixMilli())\n")
 		prepend.WriteString("var OSLsystem_os = runtime.GOOS\n")
 		prepend.WriteString("var OSLtimer func() float64 = func() float64 { return float64(time.Now().Unix()) - (OSLwincreatetime / 1000) }\n")
-		prepend.WriteString("var origin = map[string]any{\"version\": " + OSL_VERSION + ", \"isGosl\": true}\n")
+		prepend.WriteString("var origin = map[string]any{\"version\": \"" + OSL_VERSION + "\", \"isGosl\": true}\n")
 		prepend.WriteString("var OSLtimestamp func() int64 = func() int64 { return time.Now().UnixMilli() }\n")
 		prepend.WriteString("var timer float64\n")
 		prepend.WriteString("var timestamp int64\n")
