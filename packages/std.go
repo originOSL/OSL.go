@@ -714,18 +714,18 @@ func OSLsub[T float64 | int](a T, b T) T {
 func OSLmultiply[AT float64 | int | string, BT float64 | int](a AT, b BT) AT {
 	if str, ok := any(a).(string); ok {
 		n := OSLcastNumber(b)
-		var out string
 		if n < 0 {
-			out = ""
+			return any("").(AT)
 		}
-		out = strings.Repeat(str, int(n))
-		if n < 0 {
-			out = ""
-		}
-		return any(out).(AT)
+		return any(strings.Repeat(str, int(n))).(AT)
 	}
 
-	return any(OSLcastNumber(a) * OSLcastNumber(b)).(AT)
+	result := OSLcastNumber(a) * OSLcastNumber(b)
+
+	if _, ok := any(a).(int); ok {
+		return any(int(result)).(AT)
+	}
+	return any(result).(AT)
 }
 
 func OSLdivide[T float64 | int](a T, b T) float64 {
