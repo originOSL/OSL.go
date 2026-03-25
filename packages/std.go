@@ -53,6 +53,69 @@ func OSLlen(s any) int {
 	panic("OSLlen, invalid type: " + v.Kind().String())
 }
 
+func encodeURIComponent(str string) string {
+	var buf strings.Builder
+	hex := "0123456789ABCDEF"
+
+	for i := 0; i < len(str); i++ {
+		c := str[i]
+
+		if (c >= 'A' && c <= 'Z') ||
+			(c >= 'a' && c <= 'z') ||
+			(c >= '0' && c <= '9') ||
+			c == '-' || c == '_' || c == '.' || c == '!' ||
+			c == '~' || c == '*' || c == '\'' || c == '(' || c == ')' {
+
+			buf.WriteByte(c)
+		} else {
+			buf.WriteByte('%')
+			buf.WriteByte(hex[c>>4])
+			buf.WriteByte(hex[c&15])
+		}
+	}
+
+	return buf.String()
+}
+
+func decodeURIComponent(s string) string {
+	result := make([]byte, 0, len(s))
+
+	for i := 0; i < len(s); {
+		if s[i] == '%' {
+			if i+2 >= len(s) {
+				return ""
+			}
+
+			h1 := OSLfromHex(s[i+1])
+			h2 := OSLfromHex(s[i+2])
+			if h1 == -1 || h2 == -1 {
+				return ""
+			}
+
+			result = append(result, byte(h1<<4|h2))
+			i += 3
+		} else {
+			result = append(result, s[i])
+			i++
+		}
+	}
+
+	return string(result), nil
+}
+
+func OSLfromHex(c byte) int {
+	switch {
+	case '0' <= c && c <= '9':
+		return int(c - '0')
+	case 'A' <= c && c <= 'F':
+		return int(c - 'A' + 10)
+	case 'a' <= c && c <= 'f':
+		return int(c - 'a' + 10)
+	default:
+		return -1
+	}
+}
+
 func OSLtoString(s any) string {
 	switch s := s.(type) {
 	case string:
