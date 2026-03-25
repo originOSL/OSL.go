@@ -100,7 +100,7 @@ func decodeURIComponent(s string) string {
 		}
 	}
 
-	return string(result), nil
+	return string(result)
 }
 
 func OSLfromHex(c byte) int {
