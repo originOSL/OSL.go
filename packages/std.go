@@ -132,10 +132,12 @@ func OSLtoString(s any) string {
 			panic("OSLcastString: failed to read OSLio.Reader:" + err.Error())
 		}
 		return string(data)
-	case int, int64:
-		return fmt.Sprintf("%d", s)
+	case int:
+		return strconv.FormatInt(int64(s), 10)
+	case int64:
+		return strconv.FormatInt(s, 10)
 	case float64:
-		return fmt.Sprintf("%g", s)
+		return strconv.FormatFloat(s, 'f', -1, 64)
 	default:
 		return fmt.Sprintf("%v", s)
 	}
@@ -262,8 +264,11 @@ func OSLlog(v any) {
 	case []any:
 		fmt.Println(JsonStringify(v))
 		return
-	case string, int, float64, bool:
+	case string, bool:
 		fmt.Println(v)
+		return
+	default:
+		fmt.Println(OSLtoString(v))
 		return
 	}
 
