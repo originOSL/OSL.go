@@ -132,6 +132,10 @@ func OSLtoString(s any) string {
 			panic("OSLcastString: failed to read OSLio.Reader:" + err.Error())
 		}
 		return string(data)
+	case int, int64:
+		return fmt.Sprintf("%d", s)
+	case float64:
+		return fmt.Sprintf("%g", s)
 	default:
 		return fmt.Sprintf("%v", s)
 	}
