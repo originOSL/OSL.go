@@ -106,10 +106,4 @@ func (Arrays) FindLastIndex(arr []any, fn func(any) bool) int {
 	return -1
 }
 
-func (Arrays) Reverse(arr []any) []any {
-	i, j := 0, len(arr)-1
-	arr[i], arr[j] = arr[j], arr[i]
-	return arr
-}
-
 var arrays = Arrays{}
