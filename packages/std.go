@@ -1379,8 +1379,8 @@ func (m *SafeMap[K, V]) Keys() []K {
 }
 
 func OSLrangeBetween(rawp0, rawp1 any) []int {
-	p0 := OSLtoString(rawp0)
-	p1 := OSLtoString(rawp1)
+	p0 := OSLcastInt(rawp0)
+	p1 := OSLcastInt(rawp1)
 	length := p1 - p0
 	if length < 0 {
 		length = -length
