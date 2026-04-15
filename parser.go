@@ -138,7 +138,7 @@ func (utils *OSLUtils) GenerateError(ast *Token, error string) []*Token {
 // NewOSLUtils creates a new OSL parser instance
 func NewOSLUtils() *OSLUtils {
 	utils := &OSLUtils{
-		operators:   []string{"+", "++", "-", "*", "/", "//", "%", "??", "^", "b+", "b-", "b/", "b*", "b^"},
+		operators:   []string{"+", "++", "-", "*", "/", "//", "%", "??", "^", "to"},
 		comparisons: []string{"!=", "==", "!==", "===", ">", "<", "!>", "!<", ">=", "<=", "in", "notIn"},
 		logic:       []string{"and", "or", "nor", "xor", "xnor", "nand"},
 		bitwise:     []string{"|", "&", "<<", ">>", "^^"},
