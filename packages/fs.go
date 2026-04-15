@@ -26,6 +26,17 @@ func (FS) WriteFile(path any, data any) bool {
 	return err == nil
 }
 
+func (FS) AppendToFile(path any, data any) bool {
+	f, err := os.OpenFile(OSLtoString(path), os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
+	if err != nil {
+		return false
+	}
+
+	defer f.Close()
+	_, err = f.WriteString(OSLtoString(data))
+	return err == nil
+}
+
 func (FS) Rename(oldPath any, newPath any) bool {
 	err := os.Rename(OSLtoString(oldPath), OSLtoString(newPath))
 	return err == nil
