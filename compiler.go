@@ -1333,6 +1333,8 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 				return fmt.Sprintf("(%v + %v)", OSLcastToString(compiledLeft, LT), OSLcastToString(compiledRight, RT))
 			}
 			return fmt.Sprintf("OSLconcat(%v, %v)", compiledLeft, compiledRight)
+		case "to":
+			return fmt.Sprintf("OSLrangeBetween(%v, %v)", compiledLeft, compiledRight)
 		}
 		return fmt.Sprintf("%v %v %v", compiledLeft, token.Data, compiledRight)
 	case TKN_EVL:

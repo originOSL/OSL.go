@@ -1378,6 +1378,27 @@ func (m *SafeMap[K, V]) Keys() []K {
 	return keys
 }
 
+func OSLrangeBetween(rawp0, rawp1 any) []int {
+	p0 := OSLtoString(rawp0)
+	p1 := OSLtoString(rawp1)
+	length := p1 - p0
+	if length < 0 {
+		length = -length
+	}
+
+	result := make([]int, length+1)
+
+	for i := 0; i <= length; i++ {
+		if p0 < p1 {
+			result[i] = p0 + i
+		} else {
+			result[i] = p0 - i
+		}
+	}
+
+	return result
+}
+
 func (m *SafeMap[K, V]) Values() []V {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
