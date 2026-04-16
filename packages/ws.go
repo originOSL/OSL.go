@@ -37,6 +37,7 @@ type Connection struct {
 
 	data sync.Map // replaces dataMutex + map — lock-free reads/writes
 
+	onOpen    func(*Connection)
 	onMessage func(*Connection, string)
 	onClose   func(*Connection)
 }
@@ -69,6 +70,10 @@ func (WS) Connect(url string, protocols ...string) *Connection {
 	go c.readLoop()
 	go c.writeLoop()
 
+	if c._onOpen != nil {
+		go c._onOpen(c)
+	}
+
 	return c
 }
 
@@ -97,15 +102,15 @@ func (WS) NewServer(addr, path string) *Server {
 }
 
 func (s *Server) OnConnect(handler func(*Connection)) {
-	s.onConnect = handler
+	s._onConnect = handler
 }
 
 func (s *Server) OnMessage(handler func(*Connection, string)) {
-	s.onMessage = handler
+	s._onMessage = handler
 }
 
 func (s *Server) OnDisconnect(handler func(*Connection)) {
-	s.onDisconnect = handler
+	s._onDisconnect = handler
 }
 
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
@@ -122,23 +127,23 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		work: make(chan string, connWorkBuffer),
 	}
 
-	c.onMessage = func(c *Connection, msg string) {
-		if s.onMessage != nil {
-			s.onMessage(c, msg)
+	c._onMessage = func(c *Connection, msg string) {
+		if s._onMessage != nil {
+			s._onMessage(c, msg)
 		}
 	}
 
-	c.onClose = func(c *Connection) {
+	c._onClose = func(c *Connection) {
 		s.conns.Delete(c)
-		if s.onDisconnect != nil {
-			s.onDisconnect(c)
+		if s._onDisconnect != nil {
+			s._onDisconnect(c)
 		}
 	}
 
 	s.conns.Store(c, struct{}{})
 
-	if s.onConnect != nil {
-		s.onConnect(c)
+	if s._onConnect != nil {
+		s._onConnect(c)
 	}
 
 	c.startWorkers()
@@ -271,8 +276,8 @@ func (c *Connection) Close() {
 			go c.reconnectLoop()
 			return
 		}
-		if c.onClose != nil {
-			go c.onClose(c)
+		if c._onClose != nil {
+			go c._onClose(c)
 		}
 	})
 }
@@ -316,6 +321,10 @@ func (c *Connection) reconnectLoop() {
 		c.startWorkers()
 		go c.readLoop()
 		go c.writeLoop()
+
+		if c._onOpen != nil {
+			go c._onOpen(c)
+		}
 		return
 	}
 }
@@ -345,7 +354,7 @@ func (c *Connection) GetAll() map[string]any {
 }
 
 func (c *Connection) OnMessage(handler func(*Connection, string)) {
-	c.onMessage = handler
+	c._onMessage = handler
 	// Drain any messages that arrived before the handler was registered.
 	for {
 		select {
@@ -360,8 +369,12 @@ func (c *Connection) OnMessage(handler func(*Connection, string)) {
 	}
 }
 
+func (c *Connection) OnOpen(handler func(*Connection)) {
+	c._onOpen = handler
+}
+
 func (c *Connection) OnClose(handler func(*Connection)) {
-	c.onClose = handler
+	c._onClose = handler
 }
 
 // startWorkers launches a fixed pool of goroutines that drain the work channel.
@@ -371,8 +384,8 @@ func (c *Connection) startWorkers() {
 	for i := 0; i < connWorkers; i++ {
 		go func() {
 			for msg := range c.work {
-				if c.onMessage != nil {
-					c.onMessage(c, msg)
+				if c._onMessage != nil {
+					c._onMessage(c, msg)
 				}
 			}
 		}()
