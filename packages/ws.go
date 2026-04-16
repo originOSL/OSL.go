@@ -37,9 +37,8 @@ type Connection struct {
 
 	data sync.Map // replaces dataMutex + map — lock-free reads/writes
 
-	onOpen    func(*Connection)
-	onMessage func(*Connection, string)
-	onClose   func(*Connection)
+	_onMessage func(*Connection, string)
+	_onClose   func(*Connection)
 }
 
 type WS struct{}
@@ -70,10 +69,6 @@ func (WS) Connect(url string, protocols ...string) *Connection {
 	go c.readLoop()
 	go c.writeLoop()
 
-	if c._onOpen != nil {
-		go c._onOpen(c)
-	}
-
 	return c
 }
 
@@ -84,9 +79,9 @@ type Server struct {
 	conns    sync.Map // map[*Connection]struct{} — lock-free connection tracking
 	server   *http.Server
 
-	onConnect    func(*Connection)
-	onMessage    func(*Connection, string)
-	onDisconnect func(*Connection)
+	_onConnect    func(*Connection)
+	_onMessage    func(*Connection, string)
+	_onDisconnect func(*Connection)
 }
 
 func (WS) NewServer(addr, path string) *Server {
@@ -321,10 +316,6 @@ func (c *Connection) reconnectLoop() {
 		c.startWorkers()
 		go c.readLoop()
 		go c.writeLoop()
-
-		if c._onOpen != nil {
-			go c._onOpen(c)
-		}
 		return
 	}
 }
@@ -367,10 +358,6 @@ func (c *Connection) OnMessage(handler func(*Connection, string)) {
 			return
 		}
 	}
-}
-
-func (c *Connection) OnOpen(handler func(*Connection)) {
-	c._onOpen = handler
 }
 
 func (c *Connection) OnClose(handler func(*Connection)) {
