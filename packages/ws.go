@@ -193,6 +193,14 @@ func (s *Server) StartTLS(certFile, keyFile string) error {
 	return s.server.ListenAndServeTLS(certFile, keyFile)
 }
 
+func (s *Server) HandleWebSocket() http.HandlerFunc {
+	return s.handleWebSocket
+}
+
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	s.handleWebSocket(w, r)
+}
+
 func (s *Server) Stop() error {
 	if s.server == nil {
 		return nil

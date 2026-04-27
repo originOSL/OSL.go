@@ -1,0 +1,42 @@
+import "os"
+import "osl/serve"
+import "osl/ws"
+
+def main() (
+	string port = os.Getenv("PORT")
+
+	if port == "" (
+		port = "8080"
+		log "Defaulting to port" port
+	)
+
+	// routes
+	auto app = serve.New()
+	app.Use(serve.LoggingMiddleware())
+
+	app.GET("/", def(*serve.HttpContext c) -> (
+		c.String(200, "Hello World!")
+	))
+
+	// websocket
+	auto wss = ws.NewServer(":" ++ port, "/ws")
+
+	wss.OnConnect(def(*ws.Connection conn) -> (
+		log "Client connected!"
+		conn.Send("Welcome to the WebSocket server!")
+	))
+	wss.OnMessage(def(*ws.Connection conn, string message) -> (
+		log "Received:" message
+		conn.Send("Echo: " ++ message)
+	))
+	wss.OnDisconnect(def(*ws.Connection conn) -> (
+		log "Client disconnected"
+	))
+
+	app.GET("/ws", wss.HandleWebSocket())
+
+	// Start the server
+	log "Listening on port" port
+	log "Open http://localhost:" ++ port
+	app.Serve(":" ++ port)
+)

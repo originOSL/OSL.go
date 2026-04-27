@@ -37,6 +37,7 @@ type VariableContext struct {
 	IsInit              bool
 	GlobalVars          strings.Builder
 	HoistedVars         []string
+	OSLPackagePrefixes  []string
 }
 
 type MethodDefinition struct {
@@ -79,6 +80,18 @@ func mapOSLTypeToGo(oslType string) string {
 		return "[]" + mapOSLTypeToGo(before)
 	}
 	return oslType
+}
+
+func stripOSLPackagePrefix(typeName string, ctx *VariableContext) string {
+	for _, prefix := range ctx.OSLPackagePrefixes {
+		if after, ok := strings.CutPrefix(typeName, prefix+"."); ok {
+			return after
+		}
+		if after, ok := strings.CutPrefix(typeName, "*"+prefix+"."); ok {
+			return "*" + after
+		}
+	}
+	return typeName
 }
 
 func isConstantExpression(token *Token) bool {
@@ -174,6 +187,7 @@ func processImports(ctx *VariableContext) (compiled string, goImports []string) 
 
 		case strings.HasPrefix(importPath, "osl/"):
 			packageName := strings.TrimPrefix(importPath, "osl/")
+			ctx.OSLPackagePrefixes = append(ctx.OSLPackagePrefixes, packageName)
 			data, err := packagesFS.ReadFile("packages/" + packageName + ".go")
 			if err != nil {
 				panic(err)
@@ -277,6 +291,7 @@ func Compile(ast [][]*Token) string {
 		CustomCommands:      make(map[string]bool),
 		builtinTypeMethods:  make(map[string]map[string]MethodDefinition),
 		IsInit:              false,
+		OSLPackagePrefixes:  []string{},
 	}
 
 	var init [][]*Token
@@ -956,7 +971,7 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 							if _, isType := oslTypes[typePart]; isType {
 								typeName = mapOSLTypeToGo(typePart)
 							} else if typePart != "" {
-								typeName = typePart
+								typeName = stripOSLPackagePrefix(typePart, ctx)
 							}
 						}
 
@@ -1558,7 +1573,7 @@ func CompileToken(token *Token, ctx *VariableContext) string {
 									typeName = mapOSLTypeToGo(typePart)
 								} else if typePart != "" {
 									// External type like *gin.Context
-									typeName = typePart
+									typeName = stripOSLPackagePrefix(typePart, ctx)
 								}
 							}
 
@@ -2645,6 +2660,12 @@ func CompileCmd(cmd []*Token, ctx *VariableContext) string {
 			if !ctx.Imports[importPath] {
 				ctx.Imports[importPath] = true
 				ctx.ImportOrder = append(ctx.ImportOrder, importPath)
+			}
+			if after, ok := strings.CutPrefix(importPath, "osl/"); ok {
+				pkgName := after
+				if !contains(ctx.OSLPackagePrefixes, pkgName) {
+					ctx.OSLPackagePrefixes = append(ctx.OSLPackagePrefixes, pkgName)
+				}
 			}
 		}
 	case "go", "defer":

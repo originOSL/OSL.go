@@ -30,6 +30,7 @@ Commands:
   transpile <file.osl>       Transpile OSL file to Go and print to stdout
   run <file.osl>             Compile and run OSL file
   ast <file.osl>             Generate AST for OSL file
+  package <name> Print source code for an OSL package
   uninstall                  Uninstall OSL.go
   origin                     Open Origin website (https://origin.mistium.com)
   help                       Show this help message
@@ -362,6 +363,26 @@ func run(args []string) {
 	}
 }
 
+func pkg(args []string) {
+	if len(args) < 1 {
+		fmt.Println("Usage: osl package <name>")
+		fmt.Println("Available packages:")
+		entries, _ := packagesFS.ReadDir("packages")
+		for _, e := range entries {
+			name := strings.TrimSuffix(e.Name(), ".go")
+			fmt.Println("  " + name)
+		}
+		return
+	}
+	name := args[0]
+	data, err := packagesFS.ReadFile("packages/" + name + ".go")
+	if err != nil {
+		fmt.Println("Package not found:", name)
+		return
+	}
+	fmt.Print(string(data))
+}
+
 func main() {
 	args := os.Args
 	if len(args) < 2 {
@@ -381,6 +402,8 @@ func main() {
 		transpile(args[2:])
 	case "ast":
 		ast(args[2:])
+	case "package":
+		pkg(args[2:])
 	case "run":
 		run(args[2:])
 	case "uninstall":

@@ -696,8 +696,8 @@ func OSLconcat[T string | []any, T2 string | []any](a T, b T2) T {
 	return any(OSLtoString(a) + OSLtoString(b)).(T)
 }
 
-func OSLadd[T float64 | int](a T, b T) T {
-	return T(OSLcastNumber(a) + OSLcastNumber(b))
+func OSLadd(a any, b any) float64 {
+	return OSLcastNumber(a) + OSLcastNumber(b)
 }
 
 func OSLcompoundAdd(a, b any) any {
@@ -716,8 +716,8 @@ func OSLcompoundAdd(a, b any) any {
 	}
 }
 
-func OSLsub[T float64 | int](a T, b T) T {
-	return T(OSLcastNumber(a) - OSLcastNumber(b))
+func OSLsub(a any, b any) float64 {
+	return OSLcastNumber(a) - OSLcastNumber(b)
 }
 
 func OSLmultiply[AT float64 | int | string, BT float64 | int](a AT, b BT) AT {
@@ -737,7 +737,7 @@ func OSLmultiply[AT float64 | int | string, BT float64 | int](a AT, b BT) AT {
 	return any(result).(AT)
 }
 
-func OSLdivide[T float64 | int](a T, b T) float64 {
+func OSLdivide(a any, b any) float64 {
 	return float64(OSLcastNumber(a) / OSLcastNumber(b))
 }
 
